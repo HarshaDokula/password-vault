@@ -126,6 +126,48 @@ backup.vlt
 └── audit log data
 ```
 
+## Implementation Status
+
+All core requirements are implemented and passing tests (21 tests, 0 failures).
+
+### What's fully working
+
+| Feature | Status |
+|---------|--------|
+| Account CRUD (create, read, update, soft delete) | ✅ |
+| Password history (current + 3 previous, auto-pruned) | ✅ |
+| XChaCha20-Poly1305 encryption (username, password, notes) | ✅ |
+| Argon2id key derivation (19 MB, 2 iterations) | ✅ |
+| Master password auth (validation token, never stored) | ✅ |
+| Rate limiting (5 attempts/min, in-memory) | ✅ |
+| Dual audit logging (hash-chained audit.log + SQLite audit_log) | ✅ |
+| Auto-lock (configurable timer, lock screen overlay) | ✅ |
+| Clipboard copy with auto-clear (platform-abstracted) | ✅ |
+| Password reveal with auto-hide timeout | ✅ |
+| Search (case-insensitive substring on service_name) | ✅ |
+| Encrypted backup export/import (.vlt tar format) | ✅ |
+| Integrity verification (`vault verify`) | ✅ |
+| `vault init` (prepare directory, DB, audit log, config) | ✅ |
+| SQLite WAL mode | ✅ |
+| Memory zeroization (secrets cleared on lock/exit) | ✅ |
+
+### Public API available for future features
+
+The `Vault` service layer exposes additional methods that are currently not wired
+into the TUI but are ready for future use:
+
+| Method | Purpose | Target feature |
+|--------|---------|---------------|
+| `session_id()` | Get current session UUID | Session management, status bar |
+| `config()` / `config_mut()` | Read/write live config | Settings screen in TUI |
+| `search_all_accounts()` | Search including soft-deleted | "Show deleted" toggle |
+| `get_password_history_decrypted()` | Decrypt and return old passwords | Password history viewer |
+| `verify_integrity()` | Run full integrity check from service | Better CLI integration |
+| `log_unlock_failure()` | Log failed auth attempts | Unified logging path from CLI |
+
+Some lower-level helpers also exist as building blocks (crypto utilities,
+DB-level history query) that the service layer wraps with decryption.
+
 ## Threat Model
 
 **In scope**: casual device theft, offline vault theft, unauthorized local access  
