@@ -64,7 +64,8 @@ vault                   # Launch TUI (no arguments)
 
 ## Configuration
 
-Edit `config.toml` in your vault directory:
+A commented `config.toml` is auto-generated in your vault directory on creation.  
+Edit it to customize behaviour:
 
 ```toml
 [security]

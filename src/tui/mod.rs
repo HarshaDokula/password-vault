@@ -238,6 +238,9 @@ impl App {
         vault.log_app_start()?;
         vault.log_unlock_success()?;
         
+        // Write a commented default config.toml so the user sees all options
+        let _ = config::save_default_config_if_missing(&self.vault_dir);
+        
         self.vault = Some(vault);
         self.state = AppState::Unlocked;
         self.password_input.clear();

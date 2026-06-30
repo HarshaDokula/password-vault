@@ -201,7 +201,7 @@ fn cmd_init(vault_dir: &str) -> Result<(), String> {
     let _conn = db::open(&db_path.to_string_lossy())?;
     IntegrityLog::open(&audit_path.to_string_lossy())?;
 
-    config::save_config(vault_dir, &AppConfig::default())?;
+    config::save_default_config_if_missing(vault_dir)?;
     println!("Vault initialized at {}", vault_dir);
     println!("Run 'vault' to create your master password and start adding accounts.");
     
