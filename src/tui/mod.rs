@@ -97,6 +97,8 @@ pub struct App {
     clipboard: Option<Box<dyn crate::utils::clipboard::ClipboardProvider>>,
     clipboard_clear_at: Option<Instant>,
     clipboard_account: Option<String>,
+    // Integrity warnings
+    integrity_warnings: Vec<String>,
 }
 
 impl App {
@@ -134,6 +136,7 @@ impl App {
             clipboard,
             clipboard_clear_at: None,
             clipboard_account: None,
+            integrity_warnings: Vec::new(),
         }
     }
 
@@ -176,9 +179,24 @@ impl App {
                 self.password_input.clear();
                 self.refresh_accounts()?;
                 self.vault_exists = true;
+                self.last_activity = Instant::now();
+
+                // Run integrity check on startup
+                if let Some(ref v) = self.vault {
+                    match v.verify_integrity() {
+                        Ok(issues) => {
+                            if !issues.is_empty() {
+                                self.integrity_warnings = issues;
+                            }
+                        }
+                        Err(_) => {
+                            self.integrity_warnings = vec!["Integrity check failed to run.".to_string()];
+                        }
+                    }
+                }
+
                 self.message = "Vault unlocked!".to_string();
                 self.message_until = Some(Instant::now() + Duration::from_secs(2));
-                self.last_activity = Instant::now();
             }
             auth::AuthResult::Failed(msg) => {
                 self.message = msg;
@@ -242,6 +260,21 @@ impl App {
         self.first_password.clear();
         self.vault_exists = true;
         self.refresh_accounts()?;
+
+        // Run integrity check on startup
+        if let Some(ref v) = self.vault {
+            match v.verify_integrity() {
+                Ok(issues) => {
+                    if !issues.is_empty() {
+                        self.integrity_warnings = issues;
+                    }
+                }
+                Err(_) => {
+                    self.integrity_warnings = vec!["Integrity check failed to run.".to_string()];
+                }
+            }
+        }
+
         self.message = "New vault created!".to_string();
         self.message_until = Some(Instant::now() + Duration::from_secs(3));
         self.last_activity = Instant::now();
@@ -982,15 +1015,40 @@ impl App {
     }
 
     fn render_main(&mut self, f: &mut Frame, area: Rect) {
-        let chunks = Layout::default()
-            .direction(Direction::Vertical)
-            .constraints([
+        let has_warnings = !self.integrity_warnings.is_empty();
+
+        let constraints: Vec<Constraint> = if has_warnings {
+            vec![
+                Constraint::Length(2),
                 Constraint::Length(3),
                 Constraint::Min(5),
                 Constraint::Length(2),
                 Constraint::Length(2),
-            ])
+            ]
+        } else {
+            vec![
+                Constraint::Length(3),
+                Constraint::Min(5),
+                Constraint::Length(2),
+                Constraint::Length(2),
+            ]
+        };
+        let chunks = Layout::default()
+            .direction(Direction::Vertical)
+            .constraints(constraints)
             .split(area);
+
+        // Integrity warnings
+        if has_warnings {
+            let warn_text = self.integrity_warnings.join(" | ");
+            let warning = Paragraph::new(warn_text)
+                .block(Block::default().borders(Borders::ALL).title(" ⚠ Integrity Warning "))
+                .style(Style::default().fg(Color::Yellow).bg(Color::Red))
+                .alignment(Alignment::Center);
+            f.render_widget(warning, chunks[0]);
+        }
+
+        let offset = if has_warnings { 1 } else { 0 };
 
         // Search bar
         let in_search = matches!(self.state, AppState::SearchMode);
@@ -1022,7 +1080,7 @@ impl App {
         let search = Paragraph::new(search_text)
             .block(search_block)
             .style(search_style);
-        f.render_widget(search, chunks[0]);
+        f.render_widget(search, chunks[offset]);
 
         // Account list
         let items: Vec<ListItem> = self
@@ -1041,7 +1099,7 @@ impl App {
             )
             .highlight_symbol("> ");
 
-        f.render_stateful_widget(list, chunks[1], &mut self.list_state);
+        f.render_stateful_widget(list, chunks[offset + 1], &mut self.list_state);
 
         // Status / message
         let status = if !self.message.is_empty() {
@@ -1053,13 +1111,13 @@ impl App {
         };
 
         let status_line = Line::from(status);
-        f.render_widget(Paragraph::new(status_line), chunks[2]);
+        f.render_widget(Paragraph::new(status_line), chunks[offset + 2]);
 
         // Help
         let help = Paragraph::new("[a] add  [e] edit  [s] show  [c] copy  [d] delete  [/] search  [Ctrl+L] lock  [q] quit")
             .style(Style::default().fg(Color::DarkGray))
             .alignment(Alignment::Center);
-        f.render_widget(help, chunks[3]);
+        f.render_widget(help, chunks[offset + 3]);
     }
 
     fn render_password_screen(&self, f: &mut Frame, area: Rect, account: &DecryptedAccount) {
