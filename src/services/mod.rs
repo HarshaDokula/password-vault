@@ -367,6 +367,11 @@ impl Vault {
         db::get_all_accounts(&self.db)
     }
 
+    /// Log config change event.
+    pub fn log_config_change(&self) -> Result<(), String> {
+        self.log_event(EventType::ConfigChange, None, None)
+    }
+
     /// Log backup export event.
     pub fn log_backup_export(&self) -> Result<(), String> {
         self.log_event(EventType::BackupExport, None, None)

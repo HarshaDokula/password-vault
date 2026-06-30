@@ -37,6 +37,16 @@ pub fn save_default_config_if_missing(vault_dir: &str) -> Result<(), String> {
         .map_err(|e| format!("Failed to write default config: {}", e))
 }
 
+/// Save configuration to the vault directory.
+pub fn save_config(vault_dir: &str, config: &AppConfig) -> Result<(), String> {
+    let config_path = Path::new(vault_dir).join("config.toml");
+    let content = toml::to_string_pretty(config)
+        .map_err(|e| format!("Failed to serialize config: {}", e))?;
+
+    fs::write(&config_path, content)
+        .map_err(|e| format!("Failed to write config: {}", e))
+}
+
 /// Load configuration from the vault directory.
 pub fn load_config(vault_dir: &str) -> AppConfig {
     let config_path = Path::new(vault_dir).join("config.toml");

@@ -35,6 +35,7 @@ enum AppState {
     EditingAccount { account_id: String, field: EditField },
     ShowingPassword { account: DecryptedAccount, reveal_until: Instant },
     ShowingHistory,
+    EditingSettings,
     ConfirmDelete { account_id: String, service_name: String },
     SearchMode,
     Quitting,
@@ -105,6 +106,10 @@ pub struct App {
     // Password history data
     history_account_name: String,
     history_passwords: Vec<(String, String)>, // (password, changed_at)
+    // Settings editor
+    settings_selected: usize,
+    settings_editing: bool,
+    settings_input: String,
 }
 
 impl App {
@@ -146,6 +151,9 @@ impl App {
             show_deleted: false,
             history_account_name: String::new(),
             history_passwords: Vec::new(),
+            settings_selected: 0,
+            settings_editing: false,
+            settings_input: String::new(),
         }
     }
 
@@ -539,6 +547,13 @@ impl App {
                     }
                 }
             }
+            KeyCode::F(2) => {
+                // Open settings
+                self.settings_selected = 0;
+                self.settings_editing = false;
+                self.settings_input.clear();
+                self.state = AppState::EditingSettings;
+            }
             KeyCode::Char('t') => {
                 // Toggle show deleted
                 self.show_deleted = !self.show_deleted;
@@ -841,14 +856,16 @@ impl App {
                     self.state = AppState::Unlocked;
                 }
             }
+            AppState::EditingSettings => self.handle_settings(key)?,
             AppState::Quitting => {}
         }
         Ok(())
     }
 
     fn check_timeouts(&mut self) -> Result<(), String> {
-        // Auto-lock check (0 = disabled)
-        if let AppState::Unlocked = self.state {
+        // Auto-lock check (0 = disabled, applies to all authenticated states)
+        let is_authenticated = !matches!(self.state, AppState::Locked | AppState::ConfirmingPassword | AppState::Quitting);
+        if is_authenticated {
             if self.config.security.auto_lock_minutes > 0 {
                 let auto_lock = Duration::from_secs(self.config.security.auto_lock_minutes as u64 * 60);
                 if self.last_activity.elapsed() >= auto_lock {
@@ -958,6 +975,7 @@ impl App {
             AppState::ConfirmingPassword => self.render_confirm_password(f, size),
             AppState::ShowingPassword { account, .. } => self.render_password_screen(f, size, account),
             AppState::ShowingHistory => self.render_history_screen(f, size),
+            AppState::EditingSettings => self.render_settings(f, size),
             AppState::AddingService | AppState::AddingUsername | AppState::AddingPassword | AppState::AddingNotes => {
                 self.render_add_form(f, size);
             }
@@ -1172,11 +1190,192 @@ impl App {
 
         // Help
         let deleted_indicator = if self.show_deleted { " [DELETED]" } else { "" };
-        let help_text = format!("[a] add  [e] edit  [s] show  [c] copy  [d] delete  [t] toggle  [/] search  [Ctrl+L] lock  [q] quit{}", deleted_indicator);
+        let help_text = format!("[a] add  [e] edit  [s] show  [c] copy  [h] history  [d] delete  [t] toggle  [/] search  [F2] settings  [Ctrl+L] lock  [q] quit{}", deleted_indicator);
         let help = Paragraph::new(help_text)
             .style(Style::default().fg(Color::DarkGray))
             .alignment(Alignment::Center);
         f.render_widget(help, chunks[offset + 3]);
+    }
+
+    fn handle_settings(&mut self, key: KeyEvent) -> Result<(), String> {
+        self.last_activity = Instant::now();
+
+        // Ctrl+S: save
+        if key.code == KeyCode::Char('s') && key.modifiers.contains(KeyModifiers::CONTROL) {
+            // Write config to file
+            config::save_config(&self.vault_dir, &self.config)?;
+            // Log config change
+            if let Some(ref vault) = self.vault {
+                vault.log_config_change()?;
+            }
+            self.message = "Settings saved!".to_string();
+            self.message_until = Some(Instant::now() + Duration::from_secs(2));
+            self.state = AppState::Unlocked;
+            self.refresh_accounts()?;
+            return Ok(());
+        }
+
+        if self.settings_editing {
+            match key.code {
+                KeyCode::Esc => {
+                    self.settings_editing = false;
+                    self.settings_input.clear();
+                }
+                KeyCode::Enter => {
+                    // Parse and apply the value
+                    let parsed = self.settings_input.trim().to_string();
+                    match self.settings_selected {
+                        0 => {
+                            if let Ok(v) = parsed.parse::<u32>() {
+                                self.config.security.max_attempts_per_minute = v;
+                                self.rate_limiter = RateLimiter::new(v);
+                            }
+                        }
+                        1 => {
+                            if let Ok(v) = parsed.parse::<u32>() {
+                                self.config.security.auto_lock_minutes = v;
+                            }
+                        }
+                        2 => {
+                            if let Ok(v) = parsed.parse::<u32>() {
+                                self.config.clipboard.clear_after_seconds = v;
+                            }
+                        }
+                        3 => {
+                            if let Ok(v) = parsed.parse::<u32>() {
+                                self.config.ui.show_password_seconds = v;
+                            }
+                        }
+                        4 => {
+                            let lower = parsed.to_lowercase();
+                            if lower == "true" || lower == "yes" || lower == "1" {
+                                self.config.logging.enable_audit_logs = true;
+                            } else if lower == "false" || lower == "no" || lower == "0" {
+                                self.config.logging.enable_audit_logs = false;
+                            }
+                        }
+                        _ => {}
+                    }
+                    self.settings_editing = false;
+                    self.settings_input.clear();
+                }
+                KeyCode::Char(c) => {
+                    self.settings_input.push(c);
+                }
+                KeyCode::Backspace => {
+                    self.settings_input.pop();
+                }
+                _ => {}
+            }
+        } else {
+            match key.code {
+                KeyCode::Esc | KeyCode::Char('q') => {
+                    self.state = AppState::Unlocked;
+                    self.refresh_accounts()?;
+                }
+                KeyCode::Up => {
+                    if self.settings_selected > 0 {
+                        self.settings_selected -= 1;
+                    }
+                }
+                KeyCode::Down => {
+                    if self.settings_selected < 4 {
+                        self.settings_selected += 1;
+                    }
+                }
+                KeyCode::Enter => {
+                    // Start editing this field's current value
+                    self.settings_editing = true;
+                    self.settings_input = match self.settings_selected {
+                        0 => self.config.security.max_attempts_per_minute.to_string(),
+                        1 => self.config.security.auto_lock_minutes.to_string(),
+                        2 => self.config.clipboard.clear_after_seconds.to_string(),
+                        3 => self.config.ui.show_password_seconds.to_string(),
+                        4 => self.config.logging.enable_audit_logs.to_string(),
+                        _ => String::new(),
+                    };
+                }
+                _ => {}
+            }
+        }
+        Ok(())
+    }
+
+    fn settings_field_value(&self, idx: usize) -> String {
+        if self.settings_editing && self.settings_selected == idx {
+            format!("{}█", self.settings_input)
+        } else {
+            match idx {
+                0 => self.config.security.max_attempts_per_minute.to_string(),
+                1 => self.config.security.auto_lock_minutes.to_string(),
+                2 => self.config.clipboard.clear_after_seconds.to_string(),
+                3 => self.config.ui.show_password_seconds.to_string(),
+                4 => self.config.logging.enable_audit_logs.to_string(),
+                _ => String::new(),
+            }
+        }
+    }
+
+    fn render_settings(&self, f: &mut Frame, area: Rect) {
+        let block = Block::default()
+            .title(" Settings ")
+            .borders(Borders::ALL)
+            .style(Style::default().fg(Color::Yellow));
+
+        let inner = block.inner(area);
+        f.render_widget(block, area);
+
+        let field_names = [
+            "max_attempts_per_minute",
+            "auto_lock_minutes",
+            "clipboard_clear_after_seconds",
+            "show_password_seconds",
+            "enable_audit_logs",
+        ];
+
+        let mut constraints: Vec<Constraint> = Vec::new();
+        for _ in &field_names {
+            constraints.push(Constraint::Length(3));
+        }
+        constraints.push(Constraint::Length(1));
+
+        let chunks = Layout::default()
+            .direction(Direction::Vertical)
+            .margin(1)
+            .constraints(constraints)
+            .split(inner);
+
+        for (i, name) in field_names.iter().enumerate() {
+            let is_selected = i == self.settings_selected;
+            let field_style = if is_selected {
+                Style::default().fg(Color::Yellow).add_modifier(Modifier::BOLD)
+            } else {
+                Style::default().fg(Color::White)
+            };
+
+            let text = if is_selected {
+                format!("> {}: {}", name, self.settings_field_value(i))
+            } else {
+                format!("  {}: {}", name, self.settings_field_value(i))
+            };
+
+            f.render_widget(
+                Paragraph::new(text).style(field_style),
+                chunks[i],
+            );
+        }
+
+        let help = if self.settings_editing {
+            "Enter: confirm  |  Esc: cancel edit  |  Ctrl+S: save"
+        } else {
+            "Up/Down: navigate  |  Enter: edit  |  Esc: cancel  |  Ctrl+S: save"
+        };
+        f.render_widget(
+            Paragraph::new(help)
+                .style(Style::default().fg(Color::DarkGray))
+                .alignment(Alignment::Center),
+            chunks[5],
+        );
     }
 
     fn render_password_screen(&self, f: &mut Frame, area: Rect, account: &DecryptedAccount) {
