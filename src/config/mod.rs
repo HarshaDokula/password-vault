@@ -5,35 +5,34 @@ use crate::models::AppConfig;
 
 /// Write a well-commented default config.toml to the vault directory.
 /// Writes only if the file does not already exist (won't overwrite user edits).
+/// Values are derived from AppConfig::default() so they always match the code.
 pub fn save_default_config_if_missing(vault_dir: &str) -> Result<(), String> {
     let config_path = Path::new(vault_dir).join("config.toml");
     if config_path.exists() {
         return Ok(());
     }
 
-    let content = r#"# Password Vault Configuration
-# Edit these values and restart the TUI to apply changes.
+    let defaults = AppConfig::default();
+    let body = toml::to_string_pretty(&defaults)
+        .map_err(|e| format!("Failed to serialize default config: {}", e))?;
 
-[security]
-# Failed master-password attempts before rate-limiting kicks in
-max_attempts_per_minute = 5
-# Minutes of inactivity before the vault auto-locks
-# Set to 0 to disable auto-lock
-auto_lock_minutes = 15
+    let header = concat!(
+        "# Password Vault Configuration\n",
+        "# Edit these values and restart the TUI to apply changes.\n",
+        "#\n",
+        "# [security]\n",
+        "#   max_attempts_per_minute — failed attempts before rate-limiting kicks in\n",
+        "#   auto_lock_minutes         — inactivity timeout (0 = disable auto-lock)\n",
+        "# [clipboard]\n",
+        "#   clear_after_seconds       — seconds before clipboard auto-clear\n",
+        "# [ui]\n",
+        "#   show_password_seconds     — seconds before revealed passwords hide\n",
+        "# [logging]\n",
+        "#   enable_audit_logs         — whether to write to audit.log\n",
+        "\n",
+    );
 
-[clipboard]
-# Seconds before the clipboard is automatically cleared after copy
-clear_after_seconds = 20
-
-[ui]
-# Seconds before revealed passwords auto-hide on screen
-show_password_seconds = 10
-
-[logging]
-# Set to false to disable audit logging
-enable_audit_logs = true
-"#;
-
+    let content = format!("{}{}", header, body);
     fs::write(&config_path, content)
         .map_err(|e| format!("Failed to write default config: {}", e))
 }

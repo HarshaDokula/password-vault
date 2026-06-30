@@ -10,14 +10,21 @@ use rand::Rng;
 use sha2::{Sha256, Digest};
 use zeroize::Zeroize;
 
+/// Argon2id parameters.
+/// These are deliberately NOT user-configurable — changing them after vault
+/// creation would produce a different key and permanently lock the vault.
+const KDF_MEMORY_KIB: u32 = 4 * 1024; // 4 MiB
+const KDF_ITERATIONS: u32 = 3;
+const KDF_PARALLELISM: u32 = 1;
+
 /// Derive a 256-bit encryption key from a master password using Argon2id.
 pub fn derive_key(password: &str, salt: &[u8]) -> Result<[u8; 32], String> {
     let mut key = [0u8; 32];
     
     let params = Params::new(
-        4 * 1024, // 4 MB memory (reduced for constrained hardware like Raspberry Pi)
-        3,         // 3 iterations (slightly more iterations compensate for less memory)
-        1,         // 1 degree of parallelism
+        KDF_MEMORY_KIB,
+        KDF_ITERATIONS,
+        KDF_PARALLELISM,
         Some(32),  // 32 byte output
     )
     .map_err(|e| format!("Argon2 params error: {}", e))?;
