@@ -6,9 +6,9 @@ use rusqlite::Connection;
 /// Authentication result for the vault.
 pub enum AuthResult {
     /// Vault created (first launch).
-    VaultCreated,
+    VaultCreated { master_key: [u8; 32] },
     /// Vault unlocked successfully.
-    Unlocked,
+    Unlocked { master_key: [u8; 32] },
     /// Authentication failed.
     Failed(String),
 }
@@ -30,11 +30,11 @@ pub fn authenticate(
         return Ok(AuthResult::Failed("Rate limited. Please wait.".to_string()));
     }
 
-    // Derive key
-    let master_key = crypto::derive_key(password, salt)?;
-
-    // Check if vault exists (has validation token)
+    // Check if vault exists (has validation token) before deriving key
     let token = db::get_validation_token(conn)?;
+
+    // Derive key (only once) — no redundant re-derivation after auth
+    let master_key = crypto::derive_key(password, salt)?;
 
     match token {
         Some(encrypted_token) => {
@@ -42,7 +42,7 @@ pub fn authenticate(
             match crypto::verify_validation_token(&master_key, &encrypted_token) {
                 Ok(()) => {
                     rate_limiter.reset(session_type);
-                    Ok(AuthResult::Unlocked)
+                    Ok(AuthResult::Unlocked { master_key })
                 }
                 Err(_) => {
                     let remaining = rate_limiter.record_attempt(session_type);
@@ -58,7 +58,7 @@ pub fn authenticate(
             let token = crypto::create_validation_token(&master_key)?;
             db::set_validation_token(conn, &token)?;
             rate_limiter.reset(session_type);
-            Ok(AuthResult::VaultCreated)
+            Ok(AuthResult::VaultCreated { master_key })
         }
     }
 }
@@ -113,7 +113,7 @@ mod tests {
         // First call: vault doesn't exist yet
         let result = authenticate(&conn, "mypassword", &salt, &mut rate_limiter, "test");
         match result {
-            Ok(AuthResult::Unlocked) | Ok(AuthResult::VaultCreated) => {}
+            Ok(AuthResult::Unlocked { .. }) | Ok(AuthResult::VaultCreated { .. }) => {}
             _ => panic!("Expected VaultCreated or Unlocked"),
         }
     }
@@ -137,7 +137,7 @@ mod tests {
         // Correct password
         let result = authenticate(&conn, "correct", &salt, &mut rate_limiter, "test");
         match result {
-            Ok(AuthResult::Unlocked) => {}
+            Ok(AuthResult::Unlocked { .. }) => {}
             _ => panic!("Expected Unlocked"),
         }
     }

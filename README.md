@@ -14,6 +14,9 @@ A local-first, terminal-based password manager written in Rust. Lightweight, sec
 - **Soft delete** — Accounts are marked deleted, never truly gone
 - **Encrypted backups** — `.vlt` format (encrypted tar with metadata)
 - **Integrity verification** — `vault verify` checks the hash chain and database
+- **Password confirmation** — Master password is entered twice on first launch to prevent typos
+- **Search bar highlighting** — Yellow border/background indicates active search mode
+- **Optimised unlock** — Single Argon2id derivation (not double) for faster unlocking
 - **Zero cloud dependencies** — Everything stays local
 
 ## Quick Start
@@ -29,8 +32,10 @@ export VAULT_DIR=~/.vault
 ./target/release/vault
 ```
 
-On first launch, enter a strong master password to create your vault.  
-On subsequent launches, enter the same password to unlock.
+**First launch**: enter a strong master password, then confirm it (typed twice) to create your vault.  
+**Existing vault**: enter the same password to unlock.
+
+The lock screen adapts: shows **"Create Vault"** on first launch and **"Vault Locked"** on subsequent visits.
 
 ## TUI Keybindings
 
@@ -41,7 +46,7 @@ On subsequent launches, enter the same password to unlock.
 | `s` | Reveal password (auto-hides after 10s) |
 | `c` | Copy password to clipboard (auto-clears after 20s) |
 | `d` | Delete account — type `DELETE` to confirm |
-| `/` | Search accounts by service name (case-insensitive substring) |
+| `/` | Search accounts — search bar highlights with yellow border/background when active |
 | `Esc` | Cancel / clear search / close password view |
 | `↑` `↓` | Navigate account list |
 | `Ctrl+L` | Lock vault |

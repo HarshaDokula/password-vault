@@ -1,4 +1,5 @@
 /target
 /.rustup
 /.cargo
+/.cargo_home
 /tmp

@@ -125,9 +125,8 @@ fn unlock_interactive(
         }
 
         match auth::authenticate(conn, &password, &salt, rate_limiter, "cli")? {
-            auth::AuthResult::VaultCreated => {
+            auth::AuthResult::VaultCreated { master_key } => {
                 println!("New vault created!");
-                let key = auth::derive_master_key(&password, &salt)?;
                 let session_id = Uuid::new_v4().to_string();
 
                 // Log init event
@@ -141,13 +140,12 @@ fn unlock_interactive(
                     None,
                 )?;
 
-                return Ok((key, session_id));
+                return Ok((master_key, session_id));
             }
-            auth::AuthResult::Unlocked => {
+            auth::AuthResult::Unlocked { master_key } => {
                 println!("Vault unlocked!");
-                let key = auth::derive_master_key(&password, &salt)?;
                 let session_id = Uuid::new_v4().to_string();
-                return Ok((key, session_id));
+                return Ok((master_key, session_id));
             }
             auth::AuthResult::Failed(msg) => {
                 eprintln!("{}", msg);

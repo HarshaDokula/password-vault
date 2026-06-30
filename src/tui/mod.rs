@@ -26,6 +26,7 @@ use crate::utils::RateLimiter;
 /// Application state for the TUI.
 enum AppState {
     Locked,
+    ConfirmingPassword,
     Unlocked,
     AddingService,
     AddingUsername,
@@ -60,6 +61,7 @@ pub struct App {
     vault_dir: String,
     db_path: String,
     audit_path: String,
+    vault_exists: bool,
     
     // Authenticated state
     vault: Option<Vault>,
@@ -67,6 +69,7 @@ pub struct App {
     
     // Lock screen
     password_input: String,
+    first_password: String,
     
     // Search / accounts
     search_query: String,
@@ -105,6 +108,7 @@ impl App {
         let db_path = format!("{}/vault.db", vault_dir);
         let audit_path = format!("{}/audit.log", vault_dir);
         let config = AppConfig::default();
+        let vault_exists = std::path::Path::new(&db_path).exists();
         
         let clipboard = crate::utils::clipboard::create_clipboard().ok();
         
@@ -113,9 +117,11 @@ impl App {
             vault_dir,
             db_path,
             audit_path,
+            vault_exists,
             vault: None,
             rate_limiter: RateLimiter::new(config.security.max_attempts_per_minute),
             password_input: String::new(),
+            first_password: String::new(),
             search_query: String::new(),
             accounts: Vec::new(),
             list_state: ListState::default(),
@@ -152,30 +158,15 @@ impl App {
         let salt = auth::get_or_create_salt(&conn)?;
         
         match auth::authenticate(&conn, &self.password_input, &salt, &mut self.rate_limiter, "tui")? {
-            auth::AuthResult::VaultCreated => {
-                let master_key = auth::derive_master_key(&self.password_input, &salt)?;
-                let session_id = Uuid::new_v4().to_string();
-                let integrity_log = IntegrityLog::open(&self.audit_path)?;
-                
-                let vault = Vault::new(conn, integrity_log, master_key, session_id.clone(), self.config.clone());
-                
-                // Log vault init
-                let il = IntegrityLog::open(&self.audit_path)?;
-                il.append(crate::models::EventType::VaultInit, &session_id, None, None)?;
-                
-                vault.log_app_start()?;
-                vault.log_unlock_success()?;
-                
-                self.vault = Some(vault);
-                self.state = AppState::Unlocked;
+            auth::AuthResult::VaultCreated { master_key: _ } => {
+                // First launch: store password for confirmation step
+                self.first_password = self.password_input.clone();
                 self.password_input.clear();
-                self.refresh_accounts()?;
-                self.message = "New vault created!".to_string();
-                self.message_until = Some(Instant::now() + Duration::from_secs(3));
-                self.last_activity = Instant::now();
+                self.state = AppState::ConfirmingPassword;
+                self.message = String::new();
+                self.message_until = None;
             }
-            auth::AuthResult::Unlocked => {
-                let master_key = auth::derive_master_key(&self.password_input, &salt)?;
+            auth::AuthResult::Unlocked { master_key } => {
                 let session_id = Uuid::new_v4().to_string();
                 let integrity_log = IntegrityLog::open(&self.audit_path)?;
                 
@@ -187,6 +178,7 @@ impl App {
                 self.state = AppState::Unlocked;
                 self.password_input.clear();
                 self.refresh_accounts()?;
+                self.vault_exists = true;
                 self.message = "Vault unlocked!".to_string();
                 self.message_until = Some(Instant::now() + Duration::from_secs(2));
                 self.last_activity = Instant::now();
@@ -208,6 +200,54 @@ impl App {
             }
         }
         
+        Ok(())
+    }
+
+    fn confirm_password(&mut self) -> Result<(), String> {
+        if self.password_input != self.first_password {
+            // Clear the prematurely stored validation token so user can start over
+            if let Ok(conn) = db::open(&self.db_path) {
+                let _ = conn.execute(
+                    "DELETE FROM vault_metadata WHERE key = 'validation_token'",
+                    [],
+                );
+            }
+            self.vault_exists = false;
+            self.message = "Passwords do not match. Please try again.".to_string();
+            self.message_until = Some(Instant::now() + Duration::from_secs(3));
+            self.password_input.clear();
+            self.first_password.clear();
+            self.state = AppState::Locked;
+            return Ok(());
+        }
+
+        self.ensure_vault_exists()?;
+        let conn = db::open(&self.db_path)?;
+        let salt = auth::get_or_create_salt(&conn)?;
+        let master_key = auth::derive_master_key(&self.password_input, &salt)?;
+
+        let session_id = Uuid::new_v4().to_string();
+        let integrity_log = IntegrityLog::open(&self.audit_path)?;
+        
+        let vault = Vault::new(conn, integrity_log, master_key, session_id.clone(), self.config.clone());
+        
+        // Log vault init
+        let il = IntegrityLog::open(&self.audit_path)?;
+        il.append(crate::models::EventType::VaultInit, &session_id, None, None)?;
+        
+        vault.log_app_start()?;
+        vault.log_unlock_success()?;
+        
+        self.vault = Some(vault);
+        self.state = AppState::Unlocked;
+        self.password_input.clear();
+        self.first_password.clear();
+        self.vault_exists = true;
+        self.refresh_accounts()?;
+        self.message = "New vault created!".to_string();
+        self.message_until = Some(Instant::now() + Duration::from_secs(3));
+        self.last_activity = Instant::now();
+
         Ok(())
     }
 
@@ -265,6 +305,39 @@ impl App {
             }
             KeyCode::Esc => {
                 self.state = AppState::Quitting;
+            }
+            _ => {}
+        }
+        Ok(())
+    }
+
+    fn handle_key_confirming_password(&mut self, key: KeyEvent) -> Result<(), String> {
+        match key.code {
+            KeyCode::Enter => {
+                if !self.password_input.is_empty() {
+                    self.confirm_password()?;
+                }
+            }
+            KeyCode::Char(c) => {
+                self.password_input.push(c);
+            }
+            KeyCode::Backspace => {
+                self.password_input.pop();
+            }
+            KeyCode::Esc => {
+                // Cancel: go back to lock screen, remove the premature validation token
+                self.password_input.clear();
+                self.first_password.clear();
+                if let Ok(conn) = db::open(&self.db_path) {
+                    let _ = conn.execute(
+                        "DELETE FROM vault_metadata WHERE key = 'validation_token'",
+                        [],
+                    );
+                }
+                self.vault_exists = false;
+                self.state = AppState::Locked;
+                self.message = "Vault creation cancelled.".to_string();
+                self.message_until = Some(Instant::now() + Duration::from_secs(2));
             }
             _ => {}
         }
@@ -658,6 +731,7 @@ impl App {
 
         match &self.state {
             AppState::Locked => self.handle_key_locked(key)?,
+            AppState::ConfirmingPassword => self.handle_key_confirming_password(key)?,
             AppState::Unlocked | AppState::SearchMode => self.handle_key_unlocked(key)?,
             AppState::AddingService => self.handle_add_service(key)?,
             AppState::AddingUsername => self.handle_add_username(key)?,
@@ -794,6 +868,7 @@ impl App {
 
         match &self.state {
             AppState::Locked => self.render_lock_screen(f, size),
+            AppState::ConfirmingPassword => self.render_confirm_password(f, size),
             AppState::ShowingPassword { account, .. } => self.render_password_screen(f, size, account),
             AppState::AddingService | AppState::AddingUsername | AppState::AddingPassword | AppState::AddingNotes => {
                 self.render_add_form(f, size);
@@ -812,8 +887,14 @@ impl App {
     }
 
     fn render_lock_screen(&self, f: &mut Frame, area: Rect) {
+        let title = if self.vault_exists {
+            " Vault Locked "
+        } else {
+            " Create Vault "
+        };
+
         let block = Block::default()
-            .title(" Vault Locked ")
+            .title(title)
             .borders(Borders::ALL)
             .style(Style::default());
 
@@ -830,10 +911,16 @@ impl App {
             ])
             .split(inner);
 
-        let title = Paragraph::new("Enter Master Password:")
+        let prompt = if self.vault_exists {
+            "Enter Master Password:"
+        } else {
+            "Choose a Master Password:"
+        };
+
+        let title_p = Paragraph::new(prompt)
             .style(Style::default().fg(Color::Yellow))
             .alignment(Alignment::Center);
-        f.render_widget(title, chunks[0]);
+        f.render_widget(title_p, chunks[0]);
 
         let masked: String = self.password_input.chars().map(|_| '•').collect();
         let input = Paragraph::new(masked)
@@ -855,6 +942,50 @@ impl App {
         f.render_widget(help, help_area);
     }
 
+    fn render_confirm_password(&self, f: &mut Frame, area: Rect) {
+        let block = Block::default()
+            .title(" Create Vault ")
+            .borders(Borders::ALL)
+            .style(Style::default());
+
+        let inner = block.inner(area);
+        f.render_widget(block, area);
+
+        let chunks = Layout::default()
+            .direction(Direction::Vertical)
+            .margin(1)
+            .constraints([
+                Constraint::Length(3),
+                Constraint::Length(3),
+                Constraint::Length(3),
+            ])
+            .split(inner);
+
+        let title = Paragraph::new("Confirm Master Password:")
+            .style(Style::default().fg(Color::Yellow))
+            .alignment(Alignment::Center);
+        f.render_widget(title, chunks[0]);
+
+        let masked: String = self.password_input.chars().map(|_| '•').collect();
+        let input = Paragraph::new(masked)
+            .block(Block::default().borders(Borders::ALL))
+            .style(Style::default().fg(Color::White));
+        f.render_widget(input, chunks[1]);
+
+        if !self.message.is_empty() {
+            let msg = Paragraph::new(self.message.as_str())
+                .style(Style::default().fg(Color::Red))
+                .alignment(Alignment::Center);
+            f.render_widget(msg, chunks[2]);
+        }
+
+        let help = Paragraph::new("Enter: Confirm | Esc: Cancel")
+            .style(Style::default().fg(Color::DarkGray))
+            .alignment(Alignment::Center);
+        let help_area = Rect::new(area.x, area.y + area.height - 1, area.width, 1);
+        f.render_widget(help, help_area);
+    }
+
     fn render_main(&mut self, f: &mut Frame, area: Rect) {
         let chunks = Layout::default()
             .direction(Direction::Vertical)
@@ -867,7 +998,8 @@ impl App {
             .split(area);
 
         // Search bar
-        let search_text = if matches!(self.state, AppState::SearchMode) {
+        let in_search = matches!(self.state, AppState::SearchMode);
+        let search_text = if in_search {
             format!("Search: {}█", self.search_query)
         } else if !self.search_query.is_empty() {
             format!("Filter: {} (press / to search)", self.search_query)
@@ -875,9 +1007,26 @@ impl App {
             "Press / to search".to_string()
         };
 
+        let search_style = if in_search {
+            Style::default().fg(Color::Yellow)
+        } else {
+            Style::default().fg(Color::White)
+        };
+        let search_block = if in_search {
+            Block::default()
+                .borders(Borders::ALL)
+                .title(" Search ")
+                .border_style(Style::default().fg(Color::Yellow))
+                .style(Style::default().bg(Color::DarkGray))
+        } else {
+            Block::default()
+                .borders(Borders::ALL)
+                .title(" Search ")
+        };
+
         let search = Paragraph::new(search_text)
-            .block(Block::default().borders(Borders::ALL).title(" Search "))
-            .style(Style::default().fg(Color::White));
+            .block(search_block)
+            .style(search_style);
         f.render_widget(search, chunks[0]);
 
         // Account list
