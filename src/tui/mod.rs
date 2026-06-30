@@ -34,8 +34,7 @@ enum AppState {
     AddingNotes,
     EditingAccount { account_id: String, field: EditField },
     ShowingPassword { account: DecryptedAccount, reveal_until: Instant },
-    ConfirmDelete { account_id: String },
-    ConfirmMessage { message: String },
+    ConfirmDelete { account_id: String, service_name: String },
     SearchMode,
     Quitting,
 }
@@ -98,9 +97,6 @@ pub struct App {
     clipboard: Option<Box<dyn crate::utils::clipboard::ClipboardProvider>>,
     clipboard_clear_at: Option<Instant>,
     clipboard_account: Option<String>,
-    
-    // Password show
-
 }
 
 impl App {
@@ -231,10 +227,8 @@ impl App {
         
         let vault = Vault::new(conn, integrity_log, master_key, session_id.clone(), self.config.clone());
         
-        // Log vault init
-        let il = IntegrityLog::open(&self.audit_path)?;
-        il.append(crate::models::EventType::VaultInit, &session_id, None, None)?;
-        
+        // Log vault init through the vault's integrity log
+        vault.log_event(crate::models::EventType::VaultInit, None, None)?;
         vault.log_app_start()?;
         vault.log_unlock_success()?;
         
@@ -273,6 +267,7 @@ impl App {
         self.state = AppState::Locked;
         self.accounts.clear();
         self.search_query.clear();
+        self.password_input.clear();
         self.message = "Auto-locked due to inactivity.".to_string();
         self.message_until = Some(Instant::now() + Duration::from_secs(5));
         Ok(())
@@ -479,9 +474,11 @@ impl App {
             KeyCode::Char('d') => {
                 // Delete
                 if let Some(idx) = self.list_state.selected() {
-                    if let Some((id, _service_name)) = self.accounts.get(idx) {
+                    if let Some((id, service_name)) = self.accounts.get(idx) {
+                        self.edit_input.clear();
                         self.state = AppState::ConfirmDelete {
                             account_id: id.clone(),
+                            service_name: service_name.clone(),
                         };
                     }
                 }
@@ -745,16 +742,11 @@ impl App {
                 let field = field.clone();
                 self.handle_editing(key, &account_id, &field)?;
             }
-            AppState::ConfirmDelete { account_id } => {
+            AppState::ConfirmDelete { account_id, .. } => {
                 let account_id = account_id.clone();
                 self.handle_delete_confirm(key, &account_id)?;
             }
             AppState::ShowingPassword { .. } => {
-                if key.code == KeyCode::Esc || key.code == KeyCode::Enter {
-                    self.state = AppState::Unlocked;
-                }
-            }
-            AppState::ConfirmMessage { .. } => {
                 if key.code == KeyCode::Esc || key.code == KeyCode::Enter {
                     self.state = AppState::Unlocked;
                 }
@@ -765,11 +757,13 @@ impl App {
     }
 
     fn check_timeouts(&mut self) -> Result<(), String> {
-        // Auto-lock check
+        // Auto-lock check (0 = disabled)
         if let AppState::Unlocked = self.state {
-            let auto_lock = Duration::from_secs(self.config.security.auto_lock_minutes as u64 * 60);
-            if self.last_activity.elapsed() >= auto_lock {
-                self.auto_lock()?;
+            if self.config.security.auto_lock_minutes > 0 {
+                let auto_lock = Duration::from_secs(self.config.security.auto_lock_minutes as u64 * 60);
+                if self.last_activity.elapsed() >= auto_lock {
+                    self.auto_lock()?;
+                }
             }
         }
 
@@ -879,11 +873,8 @@ impl App {
             AppState::EditingAccount { account_id, field } => {
                 self.render_edit_form(f, size, account_id, field);
             }
-            AppState::ConfirmDelete { account_id } => {
-                self.render_delete_confirm(f, size, account_id);
-            }
-            AppState::ConfirmMessage { message } => {
-                self.render_message(f, size, message);
+            AppState::ConfirmDelete { account_id, service_name } => {
+                self.render_delete_confirm(f, size, account_id, service_name);
             }
             _ => self.render_main(f, size),
         }
@@ -1209,7 +1200,7 @@ impl App {
         f.render_widget(help, chunks[1]);
     }
 
-    fn render_delete_confirm(&self, f: &mut Frame, area: Rect, account_id: &str) {
+    fn render_delete_confirm(&self, f: &mut Frame, area: Rect, _account_id: &str, service_name: &str) {
         let block = Block::default()
             .title(" Delete Account ")
             .borders(Borders::ALL)
@@ -1229,7 +1220,7 @@ impl App {
             .split(inner_rect);
 
         f.render_widget(
-            Paragraph::new(format!("Delete {}?", account_id))
+            Paragraph::new(format!("Delete '{}'?", service_name))
                 .style(Style::default().fg(Color::Red))
                 .alignment(Alignment::Center),
             chunks[0],
@@ -1246,31 +1237,4 @@ impl App {
         f.render_widget(help, chunks[2]);
     }
 
-    fn render_message(&self, f: &mut Frame, area: Rect, msg: &str) {
-        let block = Block::default()
-            .borders(Borders::ALL);
-
-        let inner_rect = block.inner(area);
-        f.render_widget(block, area);
-
-        let chunks = Layout::default()
-            .direction(Direction::Vertical)
-            .margin(2)
-            .constraints([Constraint::Length(3), Constraint::Length(1)])
-            .split(inner_rect);
-
-        f.render_widget(
-            Paragraph::new(msg)
-                .alignment(Alignment::Center)
-                .style(Style::default().fg(Color::Yellow)),
-            chunks[0],
-        );
-
-        f.render_widget(
-            Paragraph::new("Press any key to continue")
-                .alignment(Alignment::Center)
-                .style(Style::default().fg(Color::Gray)),
-            chunks[1],
-        );
-    }
 }

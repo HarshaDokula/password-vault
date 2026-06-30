@@ -24,6 +24,11 @@ pub fn authenticate(
     rate_limiter: &mut RateLimiter,
     session_type: &str,
 ) -> Result<AuthResult, String> {
+    // Reject empty passwords
+    if password.is_empty() {
+        return Ok(AuthResult::Failed("Password cannot be empty.".to_string()));
+    }
+
     // Check rate limiting
     let remaining = rate_limiter.remaining_attempts(session_type);
     if remaining == 0 {

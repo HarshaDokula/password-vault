@@ -24,18 +24,6 @@ pub struct AccountSummary {
     pub deleted_at: Option<String>,
 }
 
-impl Account {
-    pub fn summary(&self) -> AccountSummary {
-        AccountSummary {
-            id: self.id.clone(),
-            service_name: self.service_name.clone(),
-            created_at: self.created_at.clone(),
-            updated_at: self.updated_at.clone(),
-            deleted_at: self.deleted_at.clone(),
-        }
-    }
-}
-
 /// Password history entry (encrypted).
 #[derive(Debug, Clone, Zeroize)]
 pub struct PasswordHistoryEntry {

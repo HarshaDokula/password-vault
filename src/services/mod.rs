@@ -34,23 +34,95 @@ impl Vault {
         }
     }
 
-    /// Get the session ID.
+    // ── Public API for future features (see README § "Implementation Status") ──
+
+    /// Get the current session UUID.
+    #[allow(dead_code)]
     pub fn session_id(&self) -> &str {
         &self.session_id
     }
 
     /// Get the configuration.
+    #[allow(dead_code)]
     pub fn config(&self) -> &AppConfig {
         &self.config
     }
 
     /// Get a mutable reference to the config.
+    #[allow(dead_code)]
     pub fn config_mut(&mut self) -> &mut AppConfig {
         &mut self.config
     }
 
+    /// Search accounts including soft-deleted.
+    #[allow(dead_code)]
+    pub fn search_all_accounts(&self, query: &str) -> Result<Vec<AccountSummary>, String> {
+        db::search_accounts(&self.db, query, true)
+    }
+
+    /// Get password history for an account (passwords decrypted).
+    #[allow(dead_code)]
+    pub fn get_password_history_decrypted(&self, account_id: &str) -> Result<Vec<String>, String> {
+        let entries = db::get_password_history(&self.db, account_id)?;
+        let mut passwords = Vec::new();
+        for entry in entries {
+            let pw = crypto::decrypt_string(&self.master_key, &entry.password)?;
+            passwords.push(pw);
+        }
+        Ok(passwords)
+    }
+
+    /// Verify database and audit log integrity.
+    #[allow(dead_code)]
+    pub fn verify_integrity(&self) -> Result<Vec<String>, String> {
+        let mut issues = Vec::new();
+
+        // Verify integrity log hash chain
+        match self.integrity_log.verify() {
+            Ok(()) => {}
+            Err(e) => {
+                issues.push(format!("Integrity log failure: {}", e));
+                self.log_event(EventType::IntegrityCheckFailure, None, None)?;
+            }
+        }
+
+        // Verify database integrity
+        match self.db.query_row("PRAGMA integrity_check", [], |row| {
+            row.get::<_, String>(0)
+        }) {
+            Ok(result) => {
+                if result != "ok" {
+                    issues.push(format!("Database integrity issue: {}", result));
+                }
+            }
+            Err(e) => {
+                issues.push(format!("Database integrity check failed: {}", e));
+            }
+        }
+
+        Ok(issues)
+    }
+
+    /// Log unlock failure (for use from CLI / pre-auth contexts).
+    #[allow(dead_code)]
+    pub fn log_unlock_failure(&self, remaining_attempts: u32) -> Result<(), String> {
+        let metadata = serde_json::json!({
+            "remaining_attempts": remaining_attempts
+        })
+        .to_string();
+        self.integrity_log.append(
+            EventType::UnlockFailure,
+            "pre-auth",
+            None,
+            Some(&metadata),
+        )?;
+        Ok(())
+    }
+
+    // ── Active API ──
+
     /// Log an event to both the integrity chain and operational store.
-    fn log_event(
+    pub(crate) fn log_event(
         &self,
         event_type: EventType,
         account_id: Option<&str>,
@@ -253,22 +325,6 @@ impl Vault {
         db::search_accounts(&self.db, query, false)
     }
 
-    /// Search accounts including soft-deleted.
-    pub fn search_all_accounts(&self, query: &str) -> Result<Vec<AccountSummary>, String> {
-        db::search_accounts(&self.db, query, true)
-    }
-
-    /// Get password history for an account (passwords decrypted).
-    pub fn get_password_history_decrypted(&self, account_id: &str) -> Result<Vec<String>, String> {
-        let entries = db::get_password_history(&self.db, account_id)?;
-        let mut passwords = Vec::new();
-        for entry in entries {
-            let pw = crypto::decrypt_string(&self.master_key, &entry.password)?;
-            passwords.push(pw);
-        }
-        Ok(passwords)
-    }
-
     /// Log a password show event.
     pub fn log_password_show(&self, account_id: &str) -> Result<(), String> {
         let metadata = serde_json::json!({
@@ -291,22 +347,6 @@ impl Vault {
     /// Log manual lock event.
     pub fn log_manual_lock(&self) -> Result<(), String> {
         self.log_event(EventType::ManualLock, None, None)
-    }
-
-    /// Log unlock failure event.
-    pub fn log_unlock_failure(&self, remaining_attempts: u32) -> Result<(), String> {
-        let metadata = serde_json::json!({
-            "remaining_attempts": remaining_attempts
-        })
-        .to_string();
-        // Use a separate append to integrity log directly, since the vault isn't unlocked
-        self.integrity_log.append(
-            EventType::UnlockFailure,
-            "pre-auth",
-            None,
-            Some(&metadata),
-        )?;
-        Ok(())
     }
 
     /// Log app start.
@@ -339,35 +379,6 @@ impl Vault {
         self.log_event(EventType::BackupImport, None, None)
     }
 
-    /// Verify database integrity.
-    pub fn verify_integrity(&self) -> Result<Vec<String>, String> {
-        let mut issues = Vec::new();
-
-        // Verify integrity log hash chain
-        match self.integrity_log.verify() {
-            Ok(()) => {}
-            Err(e) => {
-                issues.push(format!("Integrity log failure: {}", e));
-                self.log_event(EventType::IntegrityCheckFailure, None, None)?;
-            }
-        }
-
-        // Verify database integrity
-        match self.db.query_row("PRAGMA integrity_check", [], |row| {
-            row.get::<_, String>(0)
-        }) {
-            Ok(result) => {
-                if result != "ok" {
-                    issues.push(format!("Database integrity issue: {}", result));
-                }
-            }
-            Err(e) => {
-                issues.push(format!("Database integrity check failed: {}", e));
-            }
-        }
-
-        Ok(issues)
-    }
 }
 
 /// A decrypted account for display.

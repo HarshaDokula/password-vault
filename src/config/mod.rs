@@ -56,16 +56,6 @@ pub fn load_config(vault_dir: &str) -> AppConfig {
     AppConfig::default()
 }
 
-/// Save configuration to the vault directory.
-pub fn save_config(vault_dir: &str, config: &AppConfig) -> Result<(), String> {
-    let config_path = Path::new(vault_dir).join("config.toml");
-    let content = toml::to_string_pretty(config)
-        .map_err(|e| format!("Failed to serialize config: {}", e))?;
-    
-    fs::write(&config_path, content)
-        .map_err(|e| format!("Failed to write config: {}", e))
-}
-
 /// Get the default vault directory for the current platform.
 /// Checks VAULT_DIR environment variable first, then falls back to platform dirs.
 pub fn get_vault_dir() -> String {
@@ -81,15 +71,6 @@ pub fn get_vault_dir() -> String {
         return dir;
     }
     dirs_fallback()
-}
-
-/// Get the config directory path.
-pub fn get_config_dir() -> String {
-    if let Some(proj_dirs) = directories::ProjectDirs::from("com", "vault", "vault") {
-        proj_dirs.config_dir().to_string_lossy().to_string()
-    } else {
-        dirs_fallback()
-    }
 }
 
 fn dirs_fallback() -> String {

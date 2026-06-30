@@ -8,7 +8,6 @@ use chacha20poly1305::{
 };
 use rand::Rng;
 use sha2::{Sha256, Digest};
-use zeroize::Zeroize;
 
 /// Argon2id parameters.
 /// These are deliberately NOT user-configurable — changing them after vault
@@ -133,22 +132,7 @@ pub fn hex_encode(bytes: &[u8]) -> String {
     bytes.iter().map(|b| format!("{:02x}", b)).collect()
 }
 
-/// Clear sensitive data from a byte vector.
-pub fn secure_clear(data: &mut Vec<u8>) {
-    data.zeroize();
-}
 
-/// Configuration encryption key for encrypting the config file.
-/// In v1 we use a fixed key derived from the vault path.
-pub fn derive_config_key(vault_path: &str) -> [u8; 32] {
-    let mut hasher = Sha256::new();
-    hasher.update(b"vault-config-salt-v1:");
-    hasher.update(vault_path.as_bytes());
-    let result = hasher.finalize();
-    let mut key = [0u8; 32];
-    key.copy_from_slice(&result);
-    key
-}
 
 #[cfg(test)]
 mod tests {
