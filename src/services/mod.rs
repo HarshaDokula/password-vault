@@ -60,7 +60,6 @@ impl Vault {
     }
 
     /// Get password history for an account (passwords decrypted).
-    #[allow(dead_code)]
     pub fn get_password_history_decrypted(&self, account_id: &str) -> Result<Vec<String>, String> {
         let entries = db::get_password_history(&self.db, account_id)?;
         let mut passwords = Vec::new();

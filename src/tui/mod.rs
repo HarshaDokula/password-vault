@@ -34,6 +34,7 @@ enum AppState {
     AddingNotes,
     EditingAccount { account_id: String, field: EditField },
     ShowingPassword { account: DecryptedAccount, reveal_until: Instant },
+    ShowingHistory,
     ConfirmDelete { account_id: String, service_name: String },
     SearchMode,
     Quitting,
@@ -101,6 +102,9 @@ pub struct App {
     integrity_warnings: Vec<String>,
     // Deleted accounts visibility
     show_deleted: bool,
+    // Password history data
+    history_account_name: String,
+    history_passwords: Vec<(String, String)>, // (password, changed_at)
 }
 
 impl App {
@@ -140,6 +144,8 @@ impl App {
             clipboard_account: None,
             integrity_warnings: Vec::new(),
             show_deleted: false,
+            history_account_name: String::new(),
+            history_passwords: Vec::new(),
         }
     }
 
@@ -538,6 +544,35 @@ impl App {
                 self.show_deleted = !self.show_deleted;
                 self.refresh_accounts()?;
             }
+            KeyCode::Char('h') => {
+                // View password history
+                if let Some(idx) = self.list_state.selected() {
+                    if let Some((id, service_name)) = self.accounts.get(idx) {
+                        if let Some(ref vault) = self.vault {
+                            match vault.get_password_history_decrypted(id) {
+                                Ok(passwords) => {
+                                    // Also get timestamps from the db entries
+                                    let entries = db::get_password_history(&vault.db, id).unwrap_or_default();
+                                    let mut history: Vec<(String, String)> = Vec::new();
+                                    for (i, pw) in passwords.iter().enumerate() {
+                                        let ts = entries.get(i)
+                                            .map(|e| e.changed_at.clone())
+                                            .unwrap_or_else(|| "unknown".to_string());
+                                        history.push((pw.clone(), ts));
+                                    }
+                                    self.history_account_name = service_name.clone();
+                                    self.history_passwords = history;
+                                    self.state = AppState::ShowingHistory;
+                                }
+                                Err(e) => {
+                                    self.message = format!("Error: {}", e);
+                                    self.message_until = Some(Instant::now() + Duration::from_secs(3));
+                                }
+                            }
+                        }
+                    }
+                }
+            }
             KeyCode::Up => {
                 if !self.accounts.is_empty() {
                     let selected = self.list_state.selected().unwrap_or(0);
@@ -801,7 +836,7 @@ impl App {
                 let account_id = account_id.clone();
                 self.handle_delete_confirm(key, &account_id)?;
             }
-            AppState::ShowingPassword { .. } => {
+            AppState::ShowingPassword { .. } | AppState::ShowingHistory => {
                 if key.code == KeyCode::Esc || key.code == KeyCode::Enter {
                     self.state = AppState::Unlocked;
                 }
@@ -922,6 +957,7 @@ impl App {
             AppState::Locked => self.render_lock_screen(f, size),
             AppState::ConfirmingPassword => self.render_confirm_password(f, size),
             AppState::ShowingPassword { account, .. } => self.render_password_screen(f, size, account),
+            AppState::ShowingHistory => self.render_history_screen(f, size),
             AppState::AddingService | AppState::AddingUsername | AppState::AddingPassword | AppState::AddingNotes => {
                 self.render_add_form(f, size);
             }
@@ -1191,6 +1227,56 @@ impl App {
                 .style(Style::default().fg(Color::Gray)),
             chunks[3],
         );
+    }
+
+    fn render_history_screen(&self, f: &mut Frame, area: Rect) {
+        let block = Block::default()
+            .title(format!(" Password History: {} ", self.history_account_name))
+            .borders(Borders::ALL)
+            .style(Style::default().fg(Color::Yellow));
+
+        let inner_rect = block.inner(area);
+        f.render_widget(block, area);
+
+        if self.history_passwords.is_empty() {
+            let msg = Paragraph::new("No password history available.")
+                .style(Style::default().fg(Color::Gray))
+                .alignment(Alignment::Center);
+            f.render_widget(msg, inner_rect);
+        } else {
+            let constraints: Vec<Constraint> = self.history_passwords
+                .iter()
+                .flat_map(|_| vec![Constraint::Length(2), Constraint::Length(1)])
+                .chain(std::iter::once(Constraint::Length(1)))
+                .collect();
+
+            let chunks = Layout::default()
+                .direction(Direction::Vertical)
+                .margin(1)
+                .constraints(constraints)
+                .split(inner_rect);
+
+            for (i, (password, timestamp)) in self.history_passwords.iter().enumerate() {
+                let ci = i * 2;
+                let label = format!("Password #{} (changed {}):", i + 1, timestamp);
+                f.render_widget(
+                    Paragraph::new(label).style(Style::default().fg(Color::White)),
+                    chunks[ci],
+                );
+                f.render_widget(
+                    Paragraph::new(password.as_str()).style(Style::default().fg(Color::Green)),
+                    chunks[ci + 1],
+                );
+            }
+
+            let help_idx = self.history_passwords.len() * 2;
+            if help_idx < chunks.len() {
+                let help = Paragraph::new("Esc: close")
+                    .style(Style::default().fg(Color::DarkGray))
+                    .alignment(Alignment::Center);
+                f.render_widget(help, chunks[help_idx]);
+            }
+        }
     }
 
     fn render_add_form(&self, f: &mut Frame, area: Rect) {
