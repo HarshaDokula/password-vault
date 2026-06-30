@@ -5,7 +5,7 @@ A local-first, terminal-based password manager written in Rust. Lightweight, sec
 ## Features
 
 - **AES-grade encryption** — XChaCha20-Poly1305 for all secrets (username, password, notes)
-- **Argon2id key derivation** — 19 MB memory-hard password hashing
+- **Argon2id key derivation** — 4 MB memory-hard password hashing (3 iterations)
 - **Tamper-evident audit logging** — Append-only hash-chained integrity log plus queryable SQLite audit table
 - **Password history** — Retains current password + 3 previous (max 4 states)
 - **Auto-lock** — Locks after configurable inactivity period (default 15 min)
@@ -108,7 +108,7 @@ enable_audit_logs = true
 ### Encryption
 
 - **Algorithm**: XChaCha20-Poly1305 (authenticated encryption)
-- **KDF**: Argon2id (19 MB, 2 iterations, 1 parallelism)
+- **KDF**: Argon2id (4 MB, 3 iterations, 1 parallelism)
 - **Encrypted fields**: username, password, notes
 - **Plaintext fields**: service_name (for search)
 - Master password is never stored — validated via encrypted token in `vault_metadata`
@@ -142,7 +142,7 @@ All core requirements are implemented and passing tests (21 tests, 0 failures).
 | Account CRUD (create, read, update, soft delete) | ✅ |
 | Password history (current + 3 previous, auto-pruned) | ✅ |
 | XChaCha20-Poly1305 encryption (username, password, notes) | ✅ |
-| Argon2id key derivation (19 MB, 2 iterations) | ✅ |
+| Argon2id key derivation (4 MB, 3 iterations) | ✅ |
 | Master password auth (validation token, never stored) | ✅ |
 | Rate limiting (5 attempts/min, in-memory) | ✅ |
 | Dual audit logging (hash-chained audit.log + SQLite audit_log) | ✅ |

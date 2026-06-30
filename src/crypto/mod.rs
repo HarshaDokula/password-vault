@@ -15,8 +15,8 @@ pub fn derive_key(password: &str, salt: &[u8]) -> Result<[u8; 32], String> {
     let mut key = [0u8; 32];
     
     let params = Params::new(
-        19 * 1024, // 19 MB memory
-        2,         // 2 iterations
+        4 * 1024, // 4 MB memory (reduced for constrained hardware like Raspberry Pi)
+        3,         // 3 iterations (slightly more iterations compensate for less memory)
         1,         // 1 degree of parallelism
         Some(32),  // 32 byte output
     )
