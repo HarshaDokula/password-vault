@@ -71,7 +71,6 @@ impl Vault {
     }
 
     /// Verify database and audit log integrity.
-    #[allow(dead_code)]
     pub fn verify_integrity(&self) -> Result<Vec<String>, String> {
         let mut issues = Vec::new();
 
