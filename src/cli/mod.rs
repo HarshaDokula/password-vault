@@ -179,7 +179,7 @@ fn cmd_export(vault_dir: &str, db_path: &Path, audit_path: &Path, output: &str) 
     let vault = Vault::new(conn, integrity_log, master_key, session_id, config);
 
     vault.log_backup_export()?;
-    storage::export_vault(&vault, output)?;
+    storage::export_vault(&vault, &audit_path.to_string_lossy(), output)?;
     println!("Vault exported to {}", output);
     
     Ok(())
@@ -195,7 +195,7 @@ fn cmd_import(vault_dir: &str, db_path: &Path, audit_path: &Path, input: &str) -
     let config = AppConfig::default();
     let vault = Vault::new(conn, integrity_log, master_key, session_id, config);
 
-    let count = storage::import_vault(&vault, input)?;
+    let count = storage::import_vault(&vault, &audit_path.to_string_lossy(), input)?;
     vault.log_backup_import()?;
     println!("Imported {} account(s) from {}", count, input);
     

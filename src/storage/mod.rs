@@ -31,13 +31,17 @@ impl BackupMetadata {
 }
 
 /// Export the vault to a `.vlt` encrypted tar archive.
-pub fn export_vault(vault: &Vault, output_path: &str) -> Result<(), String> {
+/// `audit_path` is the path to the audit.log file to include in the backup.
+pub fn export_vault(vault: &Vault, audit_path: &str, output_path: &str) -> Result<(), String> {
     let metadata = BackupMetadata::new();
     
     // Get all accounts
     let accounts = vault.export_accounts()?;
     let accounts_json = serde_json::to_string_pretty(&accounts)
         .map_err(|e| format!("Serialization error: {}", e))?;
+
+    // Read audit log if it exists
+    let audit_content = fs::read_to_string(audit_path).unwrap_or_default();
     
     // Build tar archive in memory
     let mut tar_data = Vec::new();
@@ -59,6 +63,15 @@ pub fn export_vault(vault: &Vault, output_path: &str) -> Result<(), String> {
         header.set_mode(0o644);
         builder.append_data(&mut header, "vault.json", accounts_json.as_bytes())
             .map_err(|e| format!("Tar error: {}", e))?;
+
+        // Add audit.log
+        if !audit_content.is_empty() {
+            let mut header = tar::Header::new_gnu();
+            header.set_size(audit_content.len() as u64);
+            header.set_mode(0o644);
+            builder.append_data(&mut header, "audit.log", audit_content.as_bytes())
+                .map_err(|e| format!("Tar error: {}", e))?;
+        }
         
         builder.finish().map_err(|e| format!("Tar finish error: {}", e))?;
     }
@@ -78,8 +91,8 @@ pub fn export_vault(vault: &Vault, output_path: &str) -> Result<(), String> {
     Ok(())
 }
 
-/// Import a backup, decrypting and inserting accounts into the vault.
-pub fn import_vault(vault: &Vault, input_path: &str) -> Result<usize, String> {
+/// Import a backup, decrypting and inserting accounts and audit log into the vault.
+pub fn import_vault(vault: &Vault, audit_path: &str, input_path: &str) -> Result<usize, String> {
     let data = fs::read(input_path)
         .map_err(|e| format!("Cannot read backup: {}", e))?;
     
@@ -122,6 +135,19 @@ pub fn import_vault(vault: &Vault, input_path: &str) -> Result<usize, String> {
                     }
                 }
             }
+        } else if path == "audit.log" {
+            let mut content = String::new();
+            entry.read_to_string(&mut content)
+                .map_err(|e| format!("Read error: {}", e))?;
+            // Append audit log to existing file
+            use std::io::Write;
+            let mut file = std::fs::OpenOptions::new()
+                .append(true)
+                .create(true)
+                .open(audit_path)
+                .map_err(|e| format!("Cannot open audit log for import: {}", e))?;
+            file.write_all(content.as_bytes())
+                .map_err(|e| format!("Cannot write imported audit log: {}", e))?;
         }
     }
     
@@ -158,19 +184,23 @@ mod tests {
         vault.create_account("gitlab", "admin", "secret", Some("notes")).unwrap();
         
         let export_path = "/tmp/test_backup.vlt";
+        let audit_path = "/tmp/test_storage_audit.log";
         let _ = fs::remove_file(export_path);
         
-        export_vault(&vault, export_path).unwrap();
+        export_vault(&vault, audit_path, export_path).unwrap();
         assert!(Path::new(export_path).exists());
         
         // Create a fresh vault and import
         let vault2 = setup_test_vault();
-        let count = import_vault(&vault2, export_path).unwrap();
+        let audit_path2 = "/tmp/test_storage2_audit.log";
+        let _ = fs::remove_file(audit_path2);
+        let count = import_vault(&vault2, audit_path2, export_path).unwrap();
         assert_eq!(count, 2);
         
         let results = vault2.search_accounts("git").unwrap();
         assert_eq!(results.len(), 2);
         
         let _ = fs::remove_file(export_path);
+        let _ = fs::remove_file(audit_path2);
     }
 }
