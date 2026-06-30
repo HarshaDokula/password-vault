@@ -111,6 +111,7 @@ fn unlock_interactive(
 ) -> Result<([u8; 32], String), String> {
     let salt = auth::get_or_create_salt(conn)?;
     let stdin = io::stdin();
+    let audit_path = Path::new(vault_dir).join("audit.log");
 
     loop {
         print!("Enter master password: ");
@@ -124,16 +125,15 @@ fn unlock_interactive(
             continue;
         }
 
-        match auth::authenticate(conn, &password, &salt, rate_limiter, "cli")? {
+        let il = IntegrityLog::open(&audit_path.to_string_lossy()).ok();
+        match auth::authenticate(conn, &password, &salt, rate_limiter, "cli", il.as_ref())? {
             auth::AuthResult::VaultCreated { master_key } => {
                 println!("New vault created!");
                 let session_id = Uuid::new_v4().to_string();
 
                 // Log init event
-                let integrity_log = IntegrityLog::open(
-                    &Path::new(vault_dir).join("audit.log").to_string_lossy()
-                )?;
-                integrity_log.append(
+                let il = IntegrityLog::open(&audit_path.to_string_lossy())?;
+                il.append(
                     crate::models::EventType::VaultInit,
                     &session_id,
                     None,

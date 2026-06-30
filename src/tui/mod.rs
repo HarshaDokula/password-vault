@@ -152,8 +152,9 @@ impl App {
         
         let conn = db::open(&self.db_path)?;
         let salt = auth::get_or_create_salt(&conn)?;
+        let il = IntegrityLog::open(&self.audit_path).ok();
         
-        match auth::authenticate(&conn, &self.password_input, &salt, &mut self.rate_limiter, "tui")? {
+        match auth::authenticate(&conn, &self.password_input, &salt, &mut self.rate_limiter, "tui", il.as_ref())? {
             auth::AuthResult::VaultCreated { master_key: _ } => {
                 // First launch: store password for confirmation step
                 self.first_password = self.password_input.clone();

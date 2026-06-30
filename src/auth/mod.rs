@@ -1,5 +1,7 @@
+use crate::audit::IntegrityLog;
 use crate::crypto;
 use crate::db;
+use crate::models::EventType;
 use crate::utils::RateLimiter;
 use rusqlite::Connection;
 
@@ -17,12 +19,14 @@ pub enum AuthResult {
 /// 
 /// For a new vault: creates validation token, stores it.
 /// For an existing vault: validates the master password.
+/// If `integrity_log` is provided, rate-limit triggers are logged.
 pub fn authenticate(
     conn: &Connection,
     password: &str,
     salt: &[u8],
     rate_limiter: &mut RateLimiter,
     session_type: &str,
+    integrity_log: Option<&IntegrityLog>,
 ) -> Result<AuthResult, String> {
     // Reject empty passwords
     if password.is_empty() {
@@ -32,6 +36,14 @@ pub fn authenticate(
     // Check rate limiting
     let remaining = rate_limiter.remaining_attempts(session_type);
     if remaining == 0 {
+        if let Some(il) = integrity_log {
+            let _ = il.append(
+                EventType::RateLimitTriggered,
+                "pre-auth",
+                None,
+                Some(&serde_json::json!({"remaining_attempts": 0}).to_string()),
+            );
+        }
         return Ok(AuthResult::Failed("Rate limited. Please wait.".to_string()));
     }
 
@@ -116,7 +128,7 @@ mod tests {
         let salt = crypto::generate_salt().to_vec();
         
         // First call: vault doesn't exist yet
-        let result = authenticate(&conn, "mypassword", &salt, &mut rate_limiter, "test");
+        let result = authenticate(&conn, "mypassword", &salt, &mut rate_limiter, "test", None);
         match result {
             Ok(AuthResult::Unlocked { .. }) | Ok(AuthResult::VaultCreated { .. }) => {}
             _ => panic!("Expected VaultCreated or Unlocked"),
@@ -130,20 +142,51 @@ mod tests {
         let salt = crypto::generate_salt().to_vec();
         
         // Create vault
-        let _ = authenticate(&conn, "correct", &salt, &mut rate_limiter, "test");
+        let _ = authenticate(&conn, "correct", &salt, &mut rate_limiter, "test", None);
         
         // Wrong password
-        let result = authenticate(&conn, "wrong", &salt, &mut rate_limiter, "test");
+        let result = authenticate(&conn, "wrong", &salt, &mut rate_limiter, "test", None);
         match result {
             Ok(AuthResult::Failed(_)) => {}
             _ => panic!("Expected Failed"),
         }
         
         // Correct password
-        let result = authenticate(&conn, "correct", &salt, &mut rate_limiter, "test");
+        let result = authenticate(&conn, "correct", &salt, &mut rate_limiter, "test", None);
         match result {
             Ok(AuthResult::Unlocked { .. }) => {}
             _ => panic!("Expected Unlocked"),
         }
+    }
+
+    #[test]
+    fn test_rate_limit_logging() {
+        let (conn, db_path) = setup_test_db();
+        let _ = fs::remove_file(&db_path);
+        
+        let salt = crypto::generate_salt().to_vec();
+        let audit_path = "/tmp/test_auth_rate_limit_audit.log";
+        let _ = fs::remove_file(audit_path);
+        let il = IntegrityLog::open(audit_path).unwrap();
+        
+        // Create vault
+        let _ = authenticate(&conn, "correct", &salt, &mut RateLimiter::new(5), "test", Some(&il));
+        
+        // Exhaust rate limiter
+        let mut rate_limiter = RateLimiter::new(1);
+        let _ = authenticate(&conn, "wrong", &salt, &mut rate_limiter, "test", Some(&il));
+        
+        // Next attempt should be rate limited and logged
+        let result = authenticate(&conn, "wrong", &salt, &mut rate_limiter, "test", Some(&il));
+        match result {
+            Ok(AuthResult::Failed(msg)) => assert!(msg.contains("Rate limited")),
+            _ => panic!("Expected rate-limited Failed"),
+        }
+        
+        // Verify the log entry was written
+        let content = std::fs::read_to_string(audit_path).unwrap();
+        assert!(content.contains("rate_limit_triggered"), "Expected rate_limit_triggered in audit log");
+        
+        let _ = fs::remove_file(audit_path);
     }
 }
