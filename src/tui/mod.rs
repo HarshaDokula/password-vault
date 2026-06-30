@@ -1099,6 +1099,7 @@ impl App {
                 Constraint::Min(5),
                 Constraint::Length(2),
                 Constraint::Length(2),
+                Constraint::Length(1),
             ]
         } else {
             vec![
@@ -1106,6 +1107,7 @@ impl App {
                 Constraint::Min(5),
                 Constraint::Length(2),
                 Constraint::Length(2),
+                Constraint::Length(1),
             ]
         };
         let chunks = Layout::default()
@@ -1195,6 +1197,37 @@ impl App {
             .style(Style::default().fg(Color::DarkGray))
             .alignment(Alignment::Center);
         f.render_widget(help, chunks[offset + 3]);
+
+        // Status bar
+        let status_parts = vec![
+            format!("Vault: {}", self.vault_dir),
+            if self.config.security.auto_lock_minutes > 0 {
+                let elapsed = self.last_activity.elapsed().as_secs();
+                let max_secs = self.config.security.auto_lock_minutes as u64 * 60;
+                if max_secs > elapsed {
+                    format!("Auto-lock: {}s", max_secs - elapsed)
+                } else {
+                    "Auto-lock: now".to_string()
+                }
+            } else {
+                "Auto-lock: off".to_string()
+            },
+            if self.show_deleted {
+                "[Showing deleted]".to_string()
+            } else {
+                String::new()
+            },
+            if !self.integrity_warnings.is_empty() {
+                "⚠ Integrity issue".to_string()
+            } else {
+                String::new()
+            },
+        ];
+        let status_text: Vec<String> = status_parts.into_iter().filter(|s| !s.is_empty()).collect();
+        let status = Paragraph::new(status_text.join(" | "))
+            .style(Style::default().fg(Color::DarkGray))
+            .alignment(Alignment::Left);
+        f.render_widget(status, chunks[offset + 4]);
     }
 
     fn handle_settings(&mut self, key: KeyEvent) -> Result<(), String> {
