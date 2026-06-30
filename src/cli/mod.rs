@@ -149,6 +149,20 @@ fn unlock_interactive(
             }
             auth::AuthResult::Failed(msg) => {
                 eprintln!("{}", msg);
+                // Log unlock failure
+                if let Ok(il) = IntegrityLog::open(&audit_path.to_string_lossy()) {
+                    let remaining = rate_limiter.remaining_attempts("cli");
+                    let _ = il.append(
+                        crate::models::EventType::UnlockFailure,
+                        "pre-auth",
+                        None,
+                        Some(&serde_json::json!({"remaining_attempts": remaining}).to_string()),
+                    );
+                }
+                // If rate-limited, the message already says so — exit the loop
+                if msg.contains("Rate limited") {
+                    return Err(msg);
+                }
             }
         }
     }
