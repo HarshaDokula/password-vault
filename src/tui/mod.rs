@@ -99,6 +99,8 @@ pub struct App {
     clipboard_account: Option<String>,
     // Integrity warnings
     integrity_warnings: Vec<String>,
+    // Deleted accounts visibility
+    show_deleted: bool,
 }
 
 impl App {
@@ -137,6 +139,7 @@ impl App {
             clipboard_clear_at: None,
             clipboard_account: None,
             integrity_warnings: Vec::new(),
+            show_deleted: false,
         }
     }
 
@@ -290,6 +293,7 @@ impl App {
         self.state = AppState::Locked;
         self.accounts.clear();
         self.search_query.clear();
+        self.show_deleted = false;
         Ok(())
     }
 
@@ -301,6 +305,7 @@ impl App {
         self.state = AppState::Locked;
         self.accounts.clear();
         self.search_query.clear();
+        self.show_deleted = false;
         self.password_input.clear();
         self.message = "Auto-locked due to inactivity.".to_string();
         self.message_until = Some(Instant::now() + Duration::from_secs(5));
@@ -309,10 +314,21 @@ impl App {
 
     fn refresh_accounts(&mut self) -> Result<(), String> {
         if let Some(ref vault) = self.vault {
-            let results = vault.search_accounts(&self.search_query)?;
+            let results = if self.show_deleted {
+                vault.search_all_accounts(&self.search_query)?
+            } else {
+                vault.search_accounts(&self.search_query)?
+            };
             self.accounts = results
                 .into_iter()
-                .map(|a| (a.id, a.service_name))
+                .map(|a| {
+                    let label = if a.deleted_at.is_some() {
+                        format!("{} [deleted]", a.service_name)
+                    } else {
+                        a.service_name
+                    };
+                    (a.id, label)
+                })
                 .collect();
             
             if self.accounts.is_empty() && self.list_state.selected().is_some() {
@@ -516,6 +532,11 @@ impl App {
                         };
                     }
                 }
+            }
+            KeyCode::Char('t') => {
+                // Toggle show deleted
+                self.show_deleted = !self.show_deleted;
+                self.refresh_accounts()?;
             }
             KeyCode::Up => {
                 if !self.accounts.is_empty() {
@@ -1114,7 +1135,9 @@ impl App {
         f.render_widget(Paragraph::new(status_line), chunks[offset + 2]);
 
         // Help
-        let help = Paragraph::new("[a] add  [e] edit  [s] show  [c] copy  [d] delete  [/] search  [Ctrl+L] lock  [q] quit")
+        let deleted_indicator = if self.show_deleted { " [DELETED]" } else { "" };
+        let help_text = format!("[a] add  [e] edit  [s] show  [c] copy  [d] delete  [t] toggle  [/] search  [Ctrl+L] lock  [q] quit{}", deleted_indicator);
+        let help = Paragraph::new(help_text)
             .style(Style::default().fg(Color::DarkGray))
             .alignment(Alignment::Center);
         f.render_widget(help, chunks[offset + 3]);

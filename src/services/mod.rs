@@ -55,7 +55,6 @@ impl Vault {
     }
 
     /// Search accounts including soft-deleted.
-    #[allow(dead_code)]
     pub fn search_all_accounts(&self, query: &str) -> Result<Vec<AccountSummary>, String> {
         db::search_accounts(&self.db, query, true)
     }
