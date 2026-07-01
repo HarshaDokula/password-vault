@@ -52,14 +52,8 @@ pub fn load_config(vault_dir: &str) -> AppConfig {
     let config_path = Path::new(vault_dir).join("config.toml");
     
     if config_path.exists() {
-        match fs::read_to_string(&config_path) {
-            Ok(content) => {
-                match toml::from_str(&content) {
-                    Ok(config) => return config,
-                    Err(_) => {}
-                }
-            }
-            Err(_) => {}
+        if let Ok(content) = fs::read_to_string(&config_path) {
+            if let Ok(config) = toml::from_str(&content) { return config }
         }
     }
     

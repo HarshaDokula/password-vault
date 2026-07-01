@@ -126,12 +126,10 @@ pub fn import_vault(vault: &Vault, audit_path: &str, input_path: &str) -> Result
             for account in &accounts {
                 // Only import if not soft-deleted and not already present
                 if account.deleted_at.is_none() {
-                    match db::get_account(&vault.db, &account.id) {
-                        Ok(None) => {
-                            db::insert_account(&vault.db, account)?;
-                            count += 1;
-                        }
-                        _ => {} // Already exists, skip
+                    // Only import if not already present
+                    if let Ok(None) = db::get_account(&vault.db, &account.id) {
+                        db::insert_account(&vault.db, account)?;
+                        count += 1;
                     }
                 }
             }

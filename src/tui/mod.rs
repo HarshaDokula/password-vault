@@ -19,7 +19,7 @@ use crate::audit::IntegrityLog;
 use crate::auth;
 use crate::config;
 use crate::db;
-use crate::models::AppConfig;
+use crate::models::{AccountSummary, AppConfig};
 use crate::services::{DecryptedAccount, Vault};
 use crate::utils::RateLimiter;
 
@@ -74,7 +74,7 @@ pub struct App {
     
     // Search / accounts
     search_query: String,
-    accounts: Vec<(String, String)>, // (id, service_name)
+    accounts: Vec<AccountSummary>,
     list_state: ListState,
     focus: Focus,
     
@@ -97,6 +97,7 @@ pub struct App {
     
     // Clipboard manager
     clipboard: Option<Box<dyn crate::utils::clipboard::ClipboardProvider>>,
+    clipboard_supported: bool,
     clipboard_clear_at: Option<Instant>,
     clipboard_account: Option<String>,
     // Integrity warnings
@@ -119,7 +120,13 @@ impl App {
         let config = AppConfig::default();
         let vault_exists = std::path::Path::new(&db_path).exists();
         
-        let clipboard = crate::utils::clipboard::create_clipboard().ok();
+        let (clipboard, clipboard_supported) = match crate::utils::clipboard::create_clipboard() {
+            Ok(c) => {
+                let supported = c.is_supported();
+                (Some(c), supported)
+            }
+            Err(_) => (None, false),
+        };
         
         App {
             state: AppState::Locked,
@@ -145,6 +152,7 @@ impl App {
             last_activity: Instant::now(),
             config,
             clipboard,
+            clipboard_supported,
             clipboard_clear_at: None,
             clipboard_account: None,
             integrity_warnings: Vec::new(),
@@ -328,22 +336,11 @@ impl App {
 
     fn refresh_accounts(&mut self) -> Result<(), String> {
         if let Some(ref vault) = self.vault {
-            let results = if self.show_deleted {
+            self.accounts = if self.show_deleted {
                 vault.search_all_accounts(&self.search_query)?
             } else {
                 vault.search_accounts(&self.search_query)?
             };
-            self.accounts = results
-                .into_iter()
-                .map(|a| {
-                    let label = if a.deleted_at.is_some() {
-                        format!("{} [deleted]", a.service_name)
-                    } else {
-                        a.service_name
-                    };
-                    (a.id, label)
-                })
-                .collect();
             
             if self.accounts.is_empty() && self.list_state.selected().is_some() {
                 self.list_state.select(None);
@@ -463,9 +460,9 @@ impl App {
             KeyCode::Char('e') => {
                 // Edit selected account
                 if let Some(idx) = self.list_state.selected() {
-                    if let Some((id, _)) = self.accounts.get(idx) {
+                    if let Some(account) = self.accounts.get(idx) {
                         self.state = AppState::EditingAccount {
-                            account_id: id.clone(),
+                            account_id: account.id.clone(),
                             field: EditField::ServiceName,
                         };
                         self.edit_input.clear();
@@ -475,16 +472,16 @@ impl App {
             KeyCode::Char('s') => {
                 // Show password
                 if let Some(idx) = self.list_state.selected() {
-                    if let Some((id, _)) = self.accounts.get(idx) {
+                    if let Some(account) = self.accounts.get(idx) {
                         if let Some(ref vault) = self.vault {
-                            match vault.get_account_decrypted(id) {
-                                Ok(account) => {
+                            match vault.get_account_decrypted(&account.id) {
+                                Ok(decrypted) => {
                                     let duration = Duration::from_secs(
                                         self.config.ui.show_password_seconds as u64
                                     );
-                                    vault.log_password_show(id)?;
+                                    vault.log_password_show(&account.id)?;
                                     self.state = AppState::ShowingPassword {
-                                        account,
+                                        account: decrypted,
                                         reveal_until: Instant::now() + duration,
                                     };
                                 }
@@ -499,20 +496,23 @@ impl App {
             }
             KeyCode::Char('c') => {
                 // Copy password
-                if let Some(idx) = self.list_state.selected() {
-                    if let Some((id, _)) = self.accounts.get(idx) {
+                if !self.clipboard_supported {
+                    self.message = "Clipboard unsupported on this platform.".to_string();
+                    self.message_until = Some(Instant::now() + Duration::from_secs(3));
+                } else if let Some(idx) = self.list_state.selected() {
+                    if let Some(acct) = self.accounts.get(idx) {
                         if let Some(ref vault) = self.vault {
-                            match vault.get_account_decrypted(id) {
-                                Ok(account) => {
+                            match vault.get_account_decrypted(&acct.id) {
+                                Ok(decrypted) => {
                                     if let Some(ref mut clip) = self.clipboard {
-                                        match clip.copy_to_clipboard(&account.password) {
+                                        match clip.copy_to_clipboard(&decrypted.password) {
                                             Ok(()) => {
-                                                vault.log_password_copy(id)?;
+                                                vault.log_password_copy(&acct.id)?;
                                                 let dur = Duration::from_secs(
                                                     self.config.clipboard.clear_after_seconds as u64
                                                 );
                                                 self.clipboard_clear_at = Some(Instant::now() + dur);
-                                                self.clipboard_account = Some(id.clone());
+                                                self.clipboard_account = Some(acct.id.clone());
                                                 self.message = "Password copied to clipboard!".to_string();
                                                 self.message_until = Some(Instant::now() + Duration::from_secs(3));
                                             }
@@ -521,9 +521,6 @@ impl App {
                                                 self.message_until = Some(Instant::now() + Duration::from_secs(3));
                                             }
                                         }
-                                    } else {
-                                        self.message = "Clipboard unsupported on this platform.".to_string();
-                                        self.message_until = Some(Instant::now() + Duration::from_secs(3));
                                     }
                                 }
                                 Err(e) => {
@@ -538,11 +535,11 @@ impl App {
             KeyCode::Char('d') => {
                 // Delete
                 if let Some(idx) = self.list_state.selected() {
-                    if let Some((id, service_name)) = self.accounts.get(idx) {
+                    if let Some(account) = self.accounts.get(idx) {
                         self.edit_input.clear();
                         self.state = AppState::ConfirmDelete {
-                            account_id: id.clone(),
-                            service_name: service_name.clone(),
+                            account_id: account.id.clone(),
+                            service_name: account.service_name.clone(),
                         };
                     }
                 }
@@ -562,12 +559,12 @@ impl App {
             KeyCode::Char('h') => {
                 // View password history
                 if let Some(idx) = self.list_state.selected() {
-                    if let Some((id, service_name)) = self.accounts.get(idx) {
+                    if let Some(account) = self.accounts.get(idx) {
                         if let Some(ref vault) = self.vault {
-                            match vault.get_password_history_decrypted(id) {
+                            match vault.get_password_history_decrypted(&account.id) {
                                 Ok(passwords) => {
                                     // Also get timestamps from the db entries
-                                    let entries = db::get_password_history(&vault.db, id).unwrap_or_default();
+                                    let entries = db::get_password_history(&vault.db, &account.id).unwrap_or_default();
                                     let mut history: Vec<(String, String)> = Vec::new();
                                     for (i, pw) in passwords.iter().enumerate() {
                                         let ts = entries.get(i)
@@ -575,7 +572,7 @@ impl App {
                                             .unwrap_or_else(|| "unknown".to_string());
                                         history.push((pw.clone(), ts));
                                     }
-                                    self.history_account_name = service_name.clone();
+                                    self.history_account_name = account.service_name.clone();
                                     self.history_passwords = history;
                                     self.state = AppState::ShowingHistory;
                                 }
@@ -599,8 +596,8 @@ impl App {
                     self.list_state.select(Some(new));
                 }
             }
-            KeyCode::Down => {
-                if !self.accounts.is_empty() {
+            KeyCode::Down
+                if !self.accounts.is_empty() => {
                     let selected = self.list_state.selected().unwrap_or(0);
                     let new = if selected + 1 >= self.accounts.len() {
                         0
@@ -609,7 +606,6 @@ impl App {
                     };
                     self.list_state.select(Some(new));
                 }
-            }
             _ => {}
         }
         Ok(())
@@ -865,14 +861,13 @@ impl App {
     fn check_timeouts(&mut self) -> Result<(), String> {
         // Auto-lock check (0 = disabled, applies to all authenticated states)
         let is_authenticated = !matches!(self.state, AppState::Locked | AppState::ConfirmingPassword | AppState::Quitting);
-        if is_authenticated {
-            if self.config.security.auto_lock_minutes > 0 {
+        if is_authenticated
+            && self.config.security.auto_lock_minutes > 0 {
                 let auto_lock = Duration::from_secs(self.config.security.auto_lock_minutes as u64 * 60);
                 if self.last_activity.elapsed() >= auto_lock {
                     self.auto_lock()?;
                 }
             }
-        }
 
         // Password show timeout
         if let AppState::ShowingPassword { reveal_until, .. } = self.state {
@@ -941,11 +936,8 @@ impl App {
                 .map_err(|e| format!("Event error: {}", e))?
             {
                 let evt = event::read().map_err(|e| format!("Event error: {}", e))?;
-                match evt {
-                    Event::Key(key) => {
-                        self.handle_key_event(key)?;
-                    }
-                    _ => {}
+                if let Event::Key(key) = evt {
+                    self.handle_key_event(key)?;
                 }
             }
 
@@ -1163,7 +1155,14 @@ impl App {
         let items: Vec<ListItem> = self
             .accounts
             .iter()
-            .map(|(_, name)| ListItem::new(name.as_str()))
+            .map(|a| {
+                let label = if a.deleted_at.is_some() {
+                    format!("{} [deleted]", a.service_name)
+                } else {
+                    a.service_name.clone()
+                };
+                ListItem::new(label)
+            })
             .collect();
 
         let list = List::new(items)
@@ -1181,8 +1180,13 @@ impl App {
         // Status / message
         let status = if !self.message.is_empty() {
             Span::styled(&self.message, Style::default().fg(Color::Green))
-        } else if let Some((_, name)) = self.list_state.selected().and_then(|i| self.accounts.get(i)) {
-            Span::styled(format!("Selected: {}", name), Style::default().fg(Color::Gray))
+        } else if let Some(account) = self.list_state.selected().and_then(|i| self.accounts.get(i)) {
+            let label = if account.deleted_at.is_some() {
+                format!("Selected: {} (created: {}, updated: {}, deleted)", account.service_name, account.created_at, account.updated_at)
+            } else {
+                format!("Selected: {} (created: {}, updated: {})", account.service_name, account.created_at, account.updated_at)
+            };
+            Span::styled(label, Style::default().fg(Color::Gray))
         } else {
             Span::styled("No accounts", Style::default().fg(Color::Gray))
         };
@@ -1199,8 +1203,14 @@ impl App {
         f.render_widget(help, chunks[offset + 3]);
 
         // Status bar
+        let session_short = self.vault.as_ref()
+            .map(|v| v.session_id())
+            .map(|s| format!("Session: {}", &s[..8.min(s.len())]))
+            .unwrap_or_default();
+
         let status_parts = vec![
             format!("Vault: {}", self.vault_dir),
+            session_short,
             if self.config.security.auto_lock_minutes > 0 {
                 let elapsed = self.last_activity.elapsed().as_secs();
                 let max_secs = self.config.security.auto_lock_minutes as u64 * 60;
@@ -1214,6 +1224,11 @@ impl App {
             },
             if self.show_deleted {
                 "[Showing deleted]".to_string()
+            } else {
+                String::new()
+            },
+            if !self.clipboard_supported {
+                "⚠ No clipboard".to_string()
             } else {
                 String::new()
             },
@@ -1420,34 +1435,69 @@ impl App {
         let inner_rect = block.inner(area);
         f.render_widget(block, area);
 
+        // Count how many rows we need
+        let has_notes = account.notes.is_some();
+        let has_deleted = account.deleted_at.is_some();
+        let mut row_count = 5; // username, password, created, updated, timeout
+        if has_notes { row_count += 1; }
+        if has_deleted { row_count += 1; }
+
+        let mut constraints: Vec<Constraint> = Vec::new();
+        for _ in 0..row_count {
+            constraints.push(Constraint::Length(2));
+        }
+        constraints.push(Constraint::Length(1));
+
         let chunks = Layout::default()
             .direction(Direction::Vertical)
             .margin(1)
-            .constraints([
-                Constraint::Length(2),
-                Constraint::Length(2),
-                Constraint::Length(2),
-                Constraint::Length(3),
-                Constraint::Length(1),
-            ])
+            .constraints(constraints)
             .split(inner_rect);
+
+        let mut row = 0;
 
         f.render_widget(
             Paragraph::new(format!("Username: {}", account.username)),
-            chunks[0],
+            chunks[row],
         );
+        row += 1;
 
         f.render_widget(
             Paragraph::new(format!("Password: {}", account.password))
                 .style(Style::default().fg(Color::Green)),
-            chunks[1],
+            chunks[row],
         );
+        row += 1;
 
         if let Some(ref notes) = account.notes {
             f.render_widget(
                 Paragraph::new(format!("Notes: {}", notes)),
-                chunks[2],
+                chunks[row],
             );
+            row += 1;
+        }
+
+        f.render_widget(
+            Paragraph::new(format!("Created: {}", account.created_at))
+                .style(Style::default().fg(Color::DarkGray)),
+            chunks[row],
+        );
+        row += 1;
+
+        f.render_widget(
+            Paragraph::new(format!("Updated: {}", account.updated_at))
+                .style(Style::default().fg(Color::DarkGray)),
+            chunks[row],
+        );
+        row += 1;
+
+        if let Some(ref deleted) = account.deleted_at {
+            f.render_widget(
+                Paragraph::new(format!("Deleted: {}", deleted))
+                    .style(Style::default().fg(Color::Red)),
+                chunks[row],
+            );
+            row += 1;
         }
 
         let timeout_msg = format!(
@@ -1457,7 +1507,7 @@ impl App {
         f.render_widget(
             Paragraph::new(timeout_msg)
                 .style(Style::default().fg(Color::Gray)),
-            chunks[3],
+            chunks[row],
         );
     }
 

@@ -31,11 +31,7 @@ impl RateLimiter {
         entries.push(now);
 
         let count = entries.len() as u32;
-        if count > self.max_attempts {
-            0
-        } else {
-            self.max_attempts - count
-        }
+        self.max_attempts.saturating_sub(count)
     }
 
     /// Check remaining attempts without recording.
@@ -47,11 +43,7 @@ impl RateLimiter {
                 .filter(|t| now.duration_since(**t) < self.window)
                 .collect();
             let count = active.len() as u32;
-            if count >= self.max_attempts {
-                0
-            } else {
-                self.max_attempts - count
-            }
+            self.max_attempts.saturating_sub(count)
         } else {
             self.max_attempts
         }

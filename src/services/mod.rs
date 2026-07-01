@@ -37,21 +37,8 @@ impl Vault {
     // ── Public API for future features (see README § "Implementation Status") ──
 
     /// Get the current session UUID.
-    #[allow(dead_code)]
     pub fn session_id(&self) -> &str {
         &self.session_id
-    }
-
-    /// Get the configuration.
-    #[allow(dead_code)]
-    pub fn config(&self) -> &AppConfig {
-        &self.config
-    }
-
-    /// Get a mutable reference to the config.
-    #[allow(dead_code)]
-    pub fn config_mut(&mut self) -> &mut AppConfig {
-        &mut self.config
     }
 
     /// Search accounts including soft-deleted.
@@ -98,22 +85,6 @@ impl Vault {
         }
 
         Ok(issues)
-    }
-
-    /// Log unlock failure (for use from CLI / pre-auth contexts).
-    #[allow(dead_code)]
-    pub fn log_unlock_failure(&self, remaining_attempts: u32) -> Result<(), String> {
-        let metadata = serde_json::json!({
-            "remaining_attempts": remaining_attempts
-        })
-        .to_string();
-        self.integrity_log.append(
-            EventType::UnlockFailure,
-            "pre-auth",
-            None,
-            Some(&metadata),
-        )?;
-        Ok(())
     }
 
     // ── Active API ──
@@ -306,7 +277,6 @@ impl Vault {
         };
 
         Ok(DecryptedAccount {
-            id: account.id,
             service_name: account.service_name,
             username,
             password,
@@ -386,7 +356,6 @@ impl Vault {
 /// A decrypted account for display.
 #[derive(Debug, Clone)]
 pub struct DecryptedAccount {
-    pub id: String,
     pub service_name: String,
     pub username: String,
     pub password: String,
