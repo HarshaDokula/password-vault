@@ -6,8 +6,8 @@ use zeroize::Zeroize;
 pub struct Account {
     pub id: String,
     pub service_name: String,
-    pub username: Vec<u8>,   // encrypted
-    pub password: Vec<u8>,   // encrypted
+    pub username: Vec<u8>,      // encrypted
+    pub password: Vec<u8>,      // encrypted
     pub notes: Option<Vec<u8>>, // encrypted
     pub created_at: String,
     pub updated_at: String,

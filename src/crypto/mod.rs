@@ -1,13 +1,10 @@
-use argon2::{
-    Argon2, Algorithm, Version, Params,
-};
+use argon2::{Algorithm, Argon2, Params, Version};
 use chacha20poly1305::{
-    XChaCha20Poly1305,
     aead::{Aead, KeyInit},
-    XNonce,
+    XChaCha20Poly1305, XNonce,
 };
 use rand::Rng;
-use sha2::{Sha256, Digest};
+use sha2::{Digest, Sha256};
 
 /// Argon2id parameters.
 /// These are deliberately NOT user-configurable — changing them after vault
@@ -19,20 +16,16 @@ const KDF_PARALLELISM: u32 = 1;
 /// Derive a 256-bit encryption key from a master password using Argon2id.
 pub fn derive_key(password: &str, salt: &[u8]) -> Result<[u8; 32], String> {
     let mut key = [0u8; 32];
-    
+
     let params = Params::new(
         KDF_MEMORY_KIB,
         KDF_ITERATIONS,
         KDF_PARALLELISM,
-        Some(32),  // 32 byte output
+        Some(32), // 32 byte output
     )
     .map_err(|e| format!("Argon2 params error: {}", e))?;
 
-    let argon2 = Argon2::new(
-        Algorithm::Argon2id,
-        Version::V0x13,
-        params,
-    );
+    let argon2 = Argon2::new(Algorithm::Argon2id, Version::V0x13, params);
 
     argon2
         .hash_password_into(password.as_bytes(), salt, &mut key)
@@ -57,21 +50,21 @@ pub fn generate_random_key() -> [u8; 32] {
 
 /// Encrypt plaintext using XChaCha20-Poly1305.
 pub fn encrypt(key: &[u8; 32], plaintext: &[u8]) -> Result<Vec<u8>, String> {
-    let cipher = XChaCha20Poly1305::new_from_slice(key)
-        .map_err(|e| format!("Cipher init error: {}", e))?;
-    
+    let cipher =
+        XChaCha20Poly1305::new_from_slice(key).map_err(|e| format!("Cipher init error: {}", e))?;
+
     let mut nonce_bytes = [0u8; 24];
     rand::thread_rng().fill(&mut nonce_bytes);
     let nonce = XNonce::from_slice(&nonce_bytes);
-    
+
     let ciphertext = cipher
         .encrypt(nonce, plaintext)
         .map_err(|e| format!("Encryption error: {}", e))?;
-    
+
     // Prepend nonce to ciphertext: [nonce (24 bytes) | ciphertext]
     let mut result = nonce_bytes.to_vec();
     result.extend_from_slice(&ciphertext);
-    
+
     Ok(result)
 }
 
@@ -80,13 +73,13 @@ pub fn decrypt(key: &[u8; 32], data: &[u8]) -> Result<Vec<u8>, String> {
     if data.len() < 24 {
         return Err("Ciphertext too short".to_string());
     }
-    
+
     let (nonce_bytes, ciphertext) = data.split_at(24);
     let nonce = XNonce::from_slice(nonce_bytes);
-    
-    let cipher = XChaCha20Poly1305::new_from_slice(key)
-        .map_err(|e| format!("Cipher init error: {}", e))?;
-    
+
+    let cipher =
+        XChaCha20Poly1305::new_from_slice(key).map_err(|e| format!("Cipher init error: {}", e))?;
+
     cipher
         .decrypt(nonce, ciphertext)
         .map_err(|e| format!("Decryption error: {}", e))
@@ -132,8 +125,6 @@ pub fn hex_encode(bytes: &[u8]) -> String {
     bytes.iter().map(|b| format!("{:02x}", b)).collect()
 }
 
-
-
 #[cfg(test)]
 mod tests {
     use super::*;
@@ -142,10 +133,10 @@ mod tests {
     fn test_encrypt_decrypt_roundtrip() {
         let key = generate_random_key();
         let plaintext = b"hello world this is a test";
-        
+
         let encrypted = encrypt(&key, plaintext).unwrap();
         let decrypted = decrypt(&key, &encrypted).unwrap();
-        
+
         assert_eq!(plaintext.as_slice(), decrypted.as_slice());
     }
 
@@ -153,10 +144,10 @@ mod tests {
     fn test_encrypt_decrypt_string() {
         let key = generate_random_key();
         let plaintext = "Hello, 世界!";
-        
+
         let encrypted = encrypt_string(&key, plaintext).unwrap();
         let decrypted = decrypt_string(&key, &encrypted).unwrap();
-        
+
         assert_eq!(plaintext, decrypted);
     }
 
@@ -166,7 +157,7 @@ mod tests {
         let key1 = derive_key("password123", &salt).unwrap();
         let key2 = derive_key("password123", &salt).unwrap();
         assert_eq!(key1, key2);
-        
+
         let key3 = derive_key("different", &salt).unwrap();
         assert_ne!(key1, key3);
     }
@@ -176,7 +167,7 @@ mod tests {
         let key = generate_random_key();
         let token = create_validation_token(&key).unwrap();
         assert!(verify_validation_token(&key, &token).is_ok());
-        
+
         let wrong_key = generate_random_key();
         assert!(verify_validation_token(&wrong_key, &token).is_err());
     }
@@ -186,7 +177,7 @@ mod tests {
         let hash1 = sha256_hex(b"hello");
         let hash2 = sha256_hex(b"hello");
         assert_eq!(hash1, hash2);
-        
+
         let hash3 = sha256_hex(b"world");
         assert_ne!(hash1, hash3);
     }
@@ -195,10 +186,10 @@ mod tests {
     fn test_encrypt_different_nonces() {
         let key = generate_random_key();
         let plaintext = b"test";
-        
+
         let enc1 = encrypt(&key, plaintext).unwrap();
         let enc2 = encrypt(&key, plaintext).unwrap();
-        
+
         // Same plaintext should produce different ciphertext due to random nonce
         assert_ne!(enc1, enc2);
     }

@@ -15,7 +15,6 @@ use crate::services::Vault;
 use crate::storage;
 use crate::utils::RateLimiter;
 
-
 /// Run the CLI (command-line interface for verification and backup commands).
 pub fn run_cli(args: &[String]) -> Result<(), String> {
     if args.len() < 2 {
@@ -115,10 +114,14 @@ fn unlock_interactive(
 
     loop {
         print!("Enter master password: ");
-        io::stdout().flush().map_err(|e| format!("IO error: {}", e))?;
-        
+        io::stdout()
+            .flush()
+            .map_err(|e| format!("IO error: {}", e))?;
+
         let mut password = String::new();
-        stdin.read_line(&mut password).map_err(|e| format!("IO error: {}", e))?;
+        stdin
+            .read_line(&mut password)
+            .map_err(|e| format!("IO error: {}", e))?;
         let password = password.trim().to_string();
 
         if password.is_empty() {
@@ -133,12 +136,7 @@ fn unlock_interactive(
 
                 // Log init event
                 let il = IntegrityLog::open(&audit_path.to_string_lossy())?;
-                il.append(
-                    crate::models::EventType::VaultInit,
-                    &session_id,
-                    None,
-                    None,
-                )?;
+                il.append(crate::models::EventType::VaultInit, &session_id, None, None)?;
 
                 return Ok((master_key, session_id));
             }
@@ -168,12 +166,17 @@ fn unlock_interactive(
     }
 }
 
-fn cmd_export(vault_dir: &str, db_path: &Path, audit_path: &Path, output: &str) -> Result<(), String> {
+fn cmd_export(
+    vault_dir: &str,
+    db_path: &Path,
+    audit_path: &Path,
+    output: &str,
+) -> Result<(), String> {
     let conn = db::open(&db_path.to_string_lossy())?;
     let mut rate_limiter = RateLimiter::new(5);
-    
+
     let (master_key, session_id) = unlock_interactive(&conn, &mut rate_limiter, vault_dir)?;
-    
+
     let integrity_log = IntegrityLog::open(&audit_path.to_string_lossy())?;
     let config = AppConfig::default();
     let vault = Vault::new(conn, integrity_log, master_key, session_id, config);
@@ -181,16 +184,21 @@ fn cmd_export(vault_dir: &str, db_path: &Path, audit_path: &Path, output: &str) 
     vault.log_backup_export()?;
     storage::export_vault(&vault, &audit_path.to_string_lossy(), output)?;
     println!("Vault exported to {}", output);
-    
+
     Ok(())
 }
 
-fn cmd_import(vault_dir: &str, db_path: &Path, audit_path: &Path, input: &str) -> Result<(), String> {
+fn cmd_import(
+    vault_dir: &str,
+    db_path: &Path,
+    audit_path: &Path,
+    input: &str,
+) -> Result<(), String> {
     let conn = db::open(&db_path.to_string_lossy())?;
     let mut rate_limiter = RateLimiter::new(5);
-    
+
     let (master_key, session_id) = unlock_interactive(&conn, &mut rate_limiter, vault_dir)?;
-    
+
     let integrity_log = IntegrityLog::open(&audit_path.to_string_lossy())?;
     let config = AppConfig::default();
     let vault = Vault::new(conn, integrity_log, master_key, session_id, config);
@@ -198,7 +206,7 @@ fn cmd_import(vault_dir: &str, db_path: &Path, audit_path: &Path, input: &str) -
     let count = storage::import_vault(&vault, &audit_path.to_string_lossy(), input)?;
     vault.log_backup_import()?;
     println!("Imported {} account(s) from {}", count, input);
-    
+
     Ok(())
 }
 
@@ -206,7 +214,7 @@ fn cmd_init(vault_dir: &str) -> Result<(), String> {
     config::ensure_vault_dir(vault_dir)?;
     let db_path = Path::new(vault_dir).join("vault.db");
     let audit_path = Path::new(vault_dir).join("audit.log");
-    
+
     if db_path.exists() {
         println!("Vault already exists at {}", vault_dir);
         return Ok(());
@@ -218,6 +226,6 @@ fn cmd_init(vault_dir: &str) -> Result<(), String> {
     config::save_default_config_if_missing(vault_dir)?;
     println!("Vault initialized at {}", vault_dir);
     println!("Run 'vault' to create your master password and start adding accounts.");
-    
+
     Ok(())
 }

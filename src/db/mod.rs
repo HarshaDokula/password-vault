@@ -1,15 +1,14 @@
-use rusqlite::{Connection, params};
+use rusqlite::{params, Connection};
 use std::path::Path;
 
-use crate::models::{Account, AccountSummary, PasswordHistoryEntry, AuditEntry};
+use crate::models::{Account, AccountSummary, AuditEntry, PasswordHistoryEntry};
 
 const SCHEMA_VERSION: i32 = 1;
 
 /// Open (or create) the SQLite operational database.
 pub fn open(path: &str) -> Result<Connection, String> {
     let exists = Path::new(path).exists();
-    let conn = Connection::open(path)
-        .map_err(|e| format!("Cannot open database: {}", e))?;
+    let conn = Connection::open(path).map_err(|e| format!("Cannot open database: {}", e))?;
 
     // Enable WAL mode
     conn.execute_batch("PRAGMA journal_mode=WAL;")
@@ -109,7 +108,7 @@ pub fn get_validation_token(conn: &Connection) -> Result<Option<Vec<u8>>, String
     let mut stmt = conn
         .prepare("SELECT value FROM vault_metadata WHERE key = 'validation_token'")
         .map_err(|e| format!("Cannot prepare statement: {}", e))?;
-    
+
     let result = stmt.query_row([], |row| row.get::<_, Vec<u8>>(0));
     match result {
         Ok(token) => Ok(Some(token)),
@@ -170,7 +169,7 @@ pub fn get_account(conn: &Connection, id: &str) -> Result<Option<Account>, Strin
     let mut stmt = conn
         .prepare("SELECT id, service_name, username, password, notes, created_at, updated_at, deleted_at FROM accounts WHERE id = ?1")
         .map_err(|e| format!("Cannot prepare statement: {}", e))?;
-    
+
     let result = stmt.query_row(params![id], |row| {
         Ok(Account {
             id: row.get(0)?,
@@ -193,7 +192,11 @@ pub fn get_account(conn: &Connection, id: &str) -> Result<Option<Account>, Strin
 
 /// Search accounts by service name (case-insensitive substring).
 /// Only returns non-deleted accounts by default.
-pub fn search_accounts(conn: &Connection, query: &str, include_deleted: bool) -> Result<Vec<AccountSummary>, String> {
+pub fn search_accounts(
+    conn: &Connection,
+    query: &str,
+    include_deleted: bool,
+) -> Result<Vec<AccountSummary>, String> {
     let mut stmt = if include_deleted {
         conn.prepare(
             "SELECT id, service_name, created_at, updated_at, deleted_at FROM accounts WHERE service_name LIKE ?1 COLLATE NOCASE ORDER BY service_name"
@@ -207,16 +210,17 @@ pub fn search_accounts(conn: &Connection, query: &str, include_deleted: bool) ->
     };
 
     let pattern = format!("%{}%", query);
-    let rows = stmt.query_map(params![pattern], |row| {
-        Ok(AccountSummary {
-            id: row.get(0)?,
-            service_name: row.get(1)?,
-            created_at: row.get(2)?,
-            updated_at: row.get(3)?,
-            deleted_at: row.get(4)?,
+    let rows = stmt
+        .query_map(params![pattern], |row| {
+            Ok(AccountSummary {
+                id: row.get(0)?,
+                service_name: row.get(1)?,
+                created_at: row.get(2)?,
+                updated_at: row.get(3)?,
+                deleted_at: row.get(4)?,
+            })
         })
-    })
-    .map_err(|e| format!("Cannot search accounts: {}", e))?;
+        .map_err(|e| format!("Cannot search accounts: {}", e))?;
 
     let mut accounts = Vec::new();
     for row in rows {
@@ -230,20 +234,21 @@ pub fn get_all_accounts(conn: &Connection) -> Result<Vec<Account>, String> {
     let mut stmt = conn
         .prepare("SELECT id, service_name, username, password, notes, created_at, updated_at, deleted_at FROM accounts ORDER BY service_name")
         .map_err(|e| format!("Cannot prepare statement: {}", e))?;
-    
-    let rows = stmt.query_map([], |row| {
-        Ok(Account {
-            id: row.get(0)?,
-            service_name: row.get(1)?,
-            username: row.get(2)?,
-            password: row.get(3)?,
-            notes: row.get(4)?,
-            created_at: row.get(5)?,
-            updated_at: row.get(6)?,
-            deleted_at: row.get(7)?,
+
+    let rows = stmt
+        .query_map([], |row| {
+            Ok(Account {
+                id: row.get(0)?,
+                service_name: row.get(1)?,
+                username: row.get(2)?,
+                password: row.get(3)?,
+                notes: row.get(4)?,
+                created_at: row.get(5)?,
+                updated_at: row.get(6)?,
+                deleted_at: row.get(7)?,
+            })
         })
-    })
-    .map_err(|e| format!("Cannot get all accounts: {}", e))?;
+        .map_err(|e| format!("Cannot get all accounts: {}", e))?;
 
     let mut accounts = Vec::new();
     for row in rows {
@@ -253,7 +258,10 @@ pub fn get_all_accounts(conn: &Connection) -> Result<Vec<Account>, String> {
 }
 
 /// Insert a password history entry.
-pub fn insert_password_history(conn: &Connection, entry: &PasswordHistoryEntry) -> Result<(), String> {
+pub fn insert_password_history(
+    conn: &Connection,
+    entry: &PasswordHistoryEntry,
+) -> Result<(), String> {
     conn.execute(
         "INSERT INTO password_history (id, account_id, password, changed_at) VALUES (?1, ?2, ?3, ?4)",
         params![entry.id, entry.account_id, entry.password, entry.changed_at],
@@ -263,20 +271,24 @@ pub fn insert_password_history(conn: &Connection, entry: &PasswordHistoryEntry) 
 }
 
 /// Get password history for an account, ordered by most recent first.
-pub fn get_password_history(conn: &Connection, account_id: &str) -> Result<Vec<PasswordHistoryEntry>, String> {
+pub fn get_password_history(
+    conn: &Connection,
+    account_id: &str,
+) -> Result<Vec<PasswordHistoryEntry>, String> {
     let mut stmt = conn
         .prepare("SELECT id, account_id, password, changed_at FROM password_history WHERE account_id = ?1 ORDER BY changed_at DESC")
         .map_err(|e| format!("Cannot prepare statement: {}", e))?;
-    
-    let rows = stmt.query_map(params![account_id], |row| {
-        Ok(PasswordHistoryEntry {
-            id: row.get(0)?,
-            account_id: row.get(1)?,
-            password: row.get(2)?,
-            changed_at: row.get(3)?,
+
+    let rows = stmt
+        .query_map(params![account_id], |row| {
+            Ok(PasswordHistoryEntry {
+                id: row.get(0)?,
+                account_id: row.get(1)?,
+                password: row.get(2)?,
+                changed_at: row.get(3)?,
+            })
         })
-    })
-    .map_err(|e| format!("Cannot get password history: {}", e))?;
+        .map_err(|e| format!("Cannot get password history: {}", e))?;
 
     let mut entries = Vec::new();
     for row in rows {
@@ -342,9 +354,9 @@ mod tests {
             updated_at: "2024-01-01T00:00:00Z".to_string(),
             deleted_at: None,
         };
-        
+
         insert_account(&conn, &account).unwrap();
-        
+
         let fetched = get_account(&conn, "1").unwrap().unwrap();
         assert_eq!(fetched.service_name, "github");
         assert_eq!(fetched.username, vec![1, 2, 3]);
@@ -353,7 +365,7 @@ mod tests {
     #[test]
     fn test_search_accounts() {
         let conn = setup_test_db();
-        
+
         let a1 = Account {
             id: "1".to_string(),
             service_name: "GitHub".to_string(),
@@ -374,13 +386,13 @@ mod tests {
             updated_at: "2024-01-01T00:00:00Z".to_string(),
             deleted_at: None,
         };
-        
+
         insert_account(&conn, &a1).unwrap();
         insert_account(&conn, &a2).unwrap();
-        
+
         let results = search_accounts(&conn, "git", false).unwrap();
         assert_eq!(results.len(), 2);
-        
+
         let results = search_accounts(&conn, "hub", false).unwrap();
         assert_eq!(results.len(), 1);
         assert_eq!(results[0].service_name, "GitHub");
@@ -389,7 +401,7 @@ mod tests {
     #[test]
     fn test_soft_delete() {
         let conn = setup_test_db();
-        
+
         let account = Account {
             id: "1".to_string(),
             service_name: "test".to_string(),
@@ -401,13 +413,13 @@ mod tests {
             deleted_at: None,
         };
         insert_account(&conn, &account).unwrap();
-        
+
         soft_delete_account(&conn, "1", "2024-06-01T00:00:00Z").unwrap();
-        
+
         // Should not appear in default search
         let results = search_accounts(&conn, "test", false).unwrap();
         assert_eq!(results.len(), 0);
-        
+
         // Should appear when including deleted
         let results = search_accounts(&conn, "test", true).unwrap();
         assert_eq!(results.len(), 1);
@@ -417,7 +429,7 @@ mod tests {
     #[test]
     fn test_password_history() {
         let conn = setup_test_db();
-        
+
         // Create an account first (FK constraint)
         let account = Account {
             id: "acc1".to_string(),
@@ -430,7 +442,7 @@ mod tests {
             deleted_at: None,
         };
         insert_account(&conn, &account).unwrap();
-        
+
         let history = PasswordHistoryEntry {
             id: "h1".to_string(),
             account_id: "acc1".to_string(),
@@ -438,7 +450,7 @@ mod tests {
             changed_at: "2024-01-01T00:00:00Z".to_string(),
         };
         insert_password_history(&conn, &history).unwrap();
-        
+
         let entries = get_password_history(&conn, "acc1").unwrap();
         assert_eq!(entries.len(), 1);
         assert_eq!(entries[0].password, vec![1, 2, 3]);

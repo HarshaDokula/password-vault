@@ -33,30 +33,30 @@ pub fn save_default_config_if_missing(vault_dir: &str) -> Result<(), String> {
     );
 
     let content = format!("{}{}", header, body);
-    fs::write(&config_path, content)
-        .map_err(|e| format!("Failed to write default config: {}", e))
+    fs::write(&config_path, content).map_err(|e| format!("Failed to write default config: {}", e))
 }
 
 /// Save configuration to the vault directory.
 pub fn save_config(vault_dir: &str, config: &AppConfig) -> Result<(), String> {
     let config_path = Path::new(vault_dir).join("config.toml");
-    let content = toml::to_string_pretty(config)
-        .map_err(|e| format!("Failed to serialize config: {}", e))?;
+    let content =
+        toml::to_string_pretty(config).map_err(|e| format!("Failed to serialize config: {}", e))?;
 
-    fs::write(&config_path, content)
-        .map_err(|e| format!("Failed to write config: {}", e))
+    fs::write(&config_path, content).map_err(|e| format!("Failed to write config: {}", e))
 }
 
 /// Load configuration from the vault directory.
 pub fn load_config(vault_dir: &str) -> AppConfig {
     let config_path = Path::new(vault_dir).join("config.toml");
-    
+
     if config_path.exists() {
         if let Ok(content) = fs::read_to_string(&config_path) {
-            if let Ok(config) = toml::from_str(&content) { return config }
+            if let Ok(config) = toml::from_str(&content) {
+                return config;
+            }
         }
     }
-    
+
     AppConfig::default()
 }
 
@@ -69,7 +69,7 @@ pub fn get_vault_dir() -> String {
             return dir;
         }
     }
-    
+
     if let Some(proj_dirs) = directories::ProjectDirs::from("com", "vault", "vault") {
         let dir = proj_dirs.data_dir().to_string_lossy().to_string();
         return dir;
@@ -84,6 +84,5 @@ fn dirs_fallback() -> String {
 
 /// Ensure the vault directory exists.
 pub fn ensure_vault_dir(vault_dir: &str) -> Result<(), String> {
-    fs::create_dir_all(vault_dir)
-        .map_err(|e| format!("Cannot create vault directory: {}", e))
+    fs::create_dir_all(vault_dir).map_err(|e| format!("Cannot create vault directory: {}", e))
 }

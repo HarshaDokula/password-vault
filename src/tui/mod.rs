@@ -1,7 +1,7 @@
-use std::io;
-use std::time::{Duration, Instant};
 use crossterm::{
-    event::{self, DisableMouseCapture, EnableMouseCapture, Event, KeyCode, KeyEvent, KeyModifiers},
+    event::{
+        self, DisableMouseCapture, EnableMouseCapture, Event, KeyCode, KeyEvent, KeyModifiers,
+    },
     execute,
     terminal::{disable_raw_mode, enable_raw_mode, EnterAlternateScreen, LeaveAlternateScreen},
 };
@@ -13,6 +13,8 @@ use ratatui::{
     widgets::{Block, Borders, List, ListItem, ListState, Paragraph},
     Frame, Terminal,
 };
+use std::io;
+use std::time::{Duration, Instant};
 use uuid::Uuid;
 
 use crate::audit::IntegrityLog;
@@ -32,11 +34,20 @@ enum AppState {
     AddingUsername,
     AddingPassword,
     AddingNotes,
-    EditingAccount { account_id: String, field: EditField },
-    ShowingPassword { account: DecryptedAccount, reveal_until: Instant },
+    EditingAccount {
+        account_id: String,
+        field: EditField,
+    },
+    ShowingPassword {
+        account: DecryptedAccount,
+        reveal_until: Instant,
+    },
     ShowingHistory,
     EditingSettings,
-    ConfirmDelete { account_id: String, service_name: String },
+    ConfirmDelete {
+        account_id: String,
+        service_name: String,
+    },
     SearchMode,
     Quitting,
 }
@@ -63,38 +74,38 @@ pub struct App {
     db_path: String,
     audit_path: String,
     vault_exists: bool,
-    
+
     // Authenticated state
     vault: Option<Vault>,
     rate_limiter: RateLimiter,
-    
+
     // Lock screen
     password_input: String,
     first_password: String,
-    
+
     // Search / accounts
     search_query: String,
     accounts: Vec<AccountSummary>,
     list_state: ListState,
     focus: Focus,
-    
+
     // Add form
     add_service: String,
     add_username: String,
     add_password: String,
     add_notes: String,
-    
+
     // Edit fields
     edit_input: String,
-    
+
     // Messages
     message: String,
     message_until: Option<Instant>,
-    
+
     // Auto-lock
     last_activity: Instant,
     config: AppConfig,
-    
+
     // Clipboard manager
     clipboard: Option<Box<dyn crate::utils::clipboard::ClipboardProvider>>,
     clipboard_supported: bool,
@@ -119,7 +130,7 @@ impl App {
         let audit_path = format!("{}/audit.log", vault_dir);
         let config = AppConfig::default();
         let vault_exists = std::path::Path::new(&db_path).exists();
-        
+
         let (clipboard, clipboard_supported) = match crate::utils::clipboard::create_clipboard() {
             Ok(c) => {
                 let supported = c.is_supported();
@@ -127,7 +138,7 @@ impl App {
             }
             Err(_) => (None, false),
         };
-        
+
         App {
             state: AppState::Locked,
             vault_dir,
@@ -167,7 +178,7 @@ impl App {
 
     fn ensure_vault_exists(&self) -> Result<(), String> {
         config::ensure_vault_dir(&self.vault_dir)?;
-        
+
         // Init db if it doesn't exist
         if !std::path::Path::new(&self.db_path).exists() {
             db::open(&self.db_path)?;
@@ -177,12 +188,19 @@ impl App {
 
     fn try_unlock(&mut self) -> Result<(), String> {
         self.ensure_vault_exists()?;
-        
+
         let conn = db::open(&self.db_path)?;
         let salt = auth::get_or_create_salt(&conn)?;
         let il = IntegrityLog::open(&self.audit_path).ok();
-        
-        match auth::authenticate(&conn, &self.password_input, &salt, &mut self.rate_limiter, "tui", il.as_ref())? {
+
+        match auth::authenticate(
+            &conn,
+            &self.password_input,
+            &salt,
+            &mut self.rate_limiter,
+            "tui",
+            il.as_ref(),
+        )? {
             auth::AuthResult::VaultCreated { master_key: _ } => {
                 // First launch: store password for confirmation step
                 self.first_password = self.password_input.clone();
@@ -194,11 +212,17 @@ impl App {
             auth::AuthResult::Unlocked { master_key } => {
                 let session_id = Uuid::new_v4().to_string();
                 let integrity_log = IntegrityLog::open(&self.audit_path)?;
-                
-                let vault = Vault::new(conn, integrity_log, master_key, session_id, self.config.clone());
+
+                let vault = Vault::new(
+                    conn,
+                    integrity_log,
+                    master_key,
+                    session_id,
+                    self.config.clone(),
+                );
                 vault.log_app_start()?;
                 vault.log_unlock_success()?;
-                
+
                 self.vault = Some(vault);
                 self.state = AppState::Unlocked;
                 self.password_input.clear();
@@ -215,7 +239,8 @@ impl App {
                             }
                         }
                         Err(_) => {
-                            self.integrity_warnings = vec!["Integrity check failed to run.".to_string()];
+                            self.integrity_warnings =
+                                vec!["Integrity check failed to run.".to_string()];
                         }
                     }
                 }
@@ -239,7 +264,7 @@ impl App {
                 }
             }
         }
-        
+
         Ok(())
     }
 
@@ -268,17 +293,23 @@ impl App {
 
         let session_id = Uuid::new_v4().to_string();
         let integrity_log = IntegrityLog::open(&self.audit_path)?;
-        
-        let vault = Vault::new(conn, integrity_log, master_key, session_id.clone(), self.config.clone());
-        
+
+        let vault = Vault::new(
+            conn,
+            integrity_log,
+            master_key,
+            session_id.clone(),
+            self.config.clone(),
+        );
+
         // Log vault init through the vault's integrity log
         vault.log_event(crate::models::EventType::VaultInit, None, None)?;
         vault.log_app_start()?;
         vault.log_unlock_success()?;
-        
+
         // Write a commented default config.toml so the user sees all options
         let _ = config::save_default_config_if_missing(&self.vault_dir);
-        
+
         self.vault = Some(vault);
         self.state = AppState::Unlocked;
         self.password_input.clear();
@@ -341,7 +372,7 @@ impl App {
             } else {
                 vault.search_accounts(&self.search_query)?
             };
-            
+
             if self.accounts.is_empty() && self.list_state.selected().is_some() {
                 self.list_state.select(None);
             }
@@ -405,32 +436,30 @@ impl App {
 
     fn handle_key_unlocked(&mut self, key: KeyEvent) -> Result<(), String> {
         self.last_activity = Instant::now();
-        
+
         match &self.state {
-            AppState::SearchMode => {
-                match key.code {
-                    KeyCode::Esc => {
-                        self.search_query.clear();
-                        self.state = AppState::Unlocked;
-                        self.focus = Focus::AccountList;
-                        self.refresh_accounts()?;
-                    }
-                    KeyCode::Enter => {
-                        self.state = AppState::Unlocked;
-                        self.focus = Focus::AccountList;
-                        self.refresh_accounts()?;
-                    }
-                    KeyCode::Char(c) => {
-                        self.search_query.push(c);
-                        self.refresh_accounts()?;
-                    }
-                    KeyCode::Backspace => {
-                        self.search_query.pop();
-                        self.refresh_accounts()?;
-                    }
-                    _ => {}
+            AppState::SearchMode => match key.code {
+                KeyCode::Esc => {
+                    self.search_query.clear();
+                    self.state = AppState::Unlocked;
+                    self.focus = Focus::AccountList;
+                    self.refresh_accounts()?;
                 }
-            }
+                KeyCode::Enter => {
+                    self.state = AppState::Unlocked;
+                    self.focus = Focus::AccountList;
+                    self.refresh_accounts()?;
+                }
+                KeyCode::Char(c) => {
+                    self.search_query.push(c);
+                    self.refresh_accounts()?;
+                }
+                KeyCode::Backspace => {
+                    self.search_query.pop();
+                    self.refresh_accounts()?;
+                }
+                _ => {}
+            },
             _ => self.handle_unlocked_default(key)?,
         }
         Ok(())
@@ -477,7 +506,7 @@ impl App {
                             match vault.get_account_decrypted(&account.id) {
                                 Ok(decrypted) => {
                                     let duration = Duration::from_secs(
-                                        self.config.ui.show_password_seconds as u64
+                                        self.config.ui.show_password_seconds as u64,
                                     );
                                     vault.log_password_show(&account.id)?;
                                     self.state = AppState::ShowingPassword {
@@ -487,7 +516,8 @@ impl App {
                                 }
                                 Err(e) => {
                                     self.message = format!("Error: {}", e);
-                                    self.message_until = Some(Instant::now() + Duration::from_secs(3));
+                                    self.message_until =
+                                        Some(Instant::now() + Duration::from_secs(3));
                                 }
                             }
                         }
@@ -509,23 +539,29 @@ impl App {
                                             Ok(()) => {
                                                 vault.log_password_copy(&acct.id)?;
                                                 let dur = Duration::from_secs(
-                                                    self.config.clipboard.clear_after_seconds as u64
+                                                    self.config.clipboard.clear_after_seconds
+                                                        as u64,
                                                 );
-                                                self.clipboard_clear_at = Some(Instant::now() + dur);
+                                                self.clipboard_clear_at =
+                                                    Some(Instant::now() + dur);
                                                 self.clipboard_account = Some(acct.id.clone());
-                                                self.message = "Password copied to clipboard!".to_string();
-                                                self.message_until = Some(Instant::now() + Duration::from_secs(3));
+                                                self.message =
+                                                    "Password copied to clipboard!".to_string();
+                                                self.message_until =
+                                                    Some(Instant::now() + Duration::from_secs(3));
                                             }
                                             Err(e) => {
                                                 self.message = e;
-                                                self.message_until = Some(Instant::now() + Duration::from_secs(3));
+                                                self.message_until =
+                                                    Some(Instant::now() + Duration::from_secs(3));
                                             }
                                         }
                                     }
                                 }
                                 Err(e) => {
                                     self.message = format!("Error: {}", e);
-                                    self.message_until = Some(Instant::now() + Duration::from_secs(3));
+                                    self.message_until =
+                                        Some(Instant::now() + Duration::from_secs(3));
                                 }
                             }
                         }
@@ -564,10 +600,12 @@ impl App {
                             match vault.get_password_history_decrypted(&account.id) {
                                 Ok(passwords) => {
                                     // Also get timestamps from the db entries
-                                    let entries = db::get_password_history(&vault.db, &account.id).unwrap_or_default();
+                                    let entries = db::get_password_history(&vault.db, &account.id)
+                                        .unwrap_or_default();
                                     let mut history: Vec<(String, String)> = Vec::new();
                                     for (i, pw) in passwords.iter().enumerate() {
-                                        let ts = entries.get(i)
+                                        let ts = entries
+                                            .get(i)
                                             .map(|e| e.changed_at.clone())
                                             .unwrap_or_else(|| "unknown".to_string());
                                         history.push((pw.clone(), ts));
@@ -578,7 +616,8 @@ impl App {
                                 }
                                 Err(e) => {
                                     self.message = format!("Error: {}", e);
-                                    self.message_until = Some(Instant::now() + Duration::from_secs(3));
+                                    self.message_until =
+                                        Some(Instant::now() + Duration::from_secs(3));
                                 }
                             }
                         }
@@ -596,16 +635,15 @@ impl App {
                     self.list_state.select(Some(new));
                 }
             }
-            KeyCode::Down
-                if !self.accounts.is_empty() => {
-                    let selected = self.list_state.selected().unwrap_or(0);
-                    let new = if selected + 1 >= self.accounts.len() {
-                        0
-                    } else {
-                        selected + 1
-                    };
-                    self.list_state.select(Some(new));
-                }
+            KeyCode::Down if !self.accounts.is_empty() => {
+                let selected = self.list_state.selected().unwrap_or(0);
+                let new = if selected + 1 >= self.accounts.len() {
+                    0
+                } else {
+                    selected + 1
+                };
+                self.list_state.select(Some(new));
+            }
             _ => {}
         }
         Ok(())
@@ -623,7 +661,9 @@ impl App {
                 }
             }
             KeyCode::Char(c) => self.add_service.push(c),
-            KeyCode::Backspace => { self.add_service.pop(); }
+            KeyCode::Backspace => {
+                self.add_service.pop();
+            }
             _ => {}
         }
         Ok(())
@@ -641,7 +681,9 @@ impl App {
                 }
             }
             KeyCode::Char(c) => self.add_username.push(c),
-            KeyCode::Backspace => { self.add_username.pop(); }
+            KeyCode::Backspace => {
+                self.add_username.pop();
+            }
             _ => {}
         }
         Ok(())
@@ -659,7 +701,9 @@ impl App {
                 }
             }
             KeyCode::Char(c) => self.add_password.push(c),
-            KeyCode::Backspace => { self.add_password.pop(); }
+            KeyCode::Backspace => {
+                self.add_password.pop();
+            }
             _ => {}
         }
         Ok(())
@@ -674,8 +718,17 @@ impl App {
             KeyCode::Enter => {
                 // Create account
                 if let Some(ref vault) = self.vault {
-                    let notes = if self.add_notes.is_empty() { None } else { Some(self.add_notes.as_str()) };
-                    match vault.create_account(&self.add_service, &self.add_username, &self.add_password, notes) {
+                    let notes = if self.add_notes.is_empty() {
+                        None
+                    } else {
+                        Some(self.add_notes.as_str())
+                    };
+                    match vault.create_account(
+                        &self.add_service,
+                        &self.add_username,
+                        &self.add_password,
+                        notes,
+                    ) {
                         Ok(_) => {
                             self.message = format!("Account '{}' created!", self.add_service);
                             self.message_until = Some(Instant::now() + Duration::from_secs(3));
@@ -690,13 +743,20 @@ impl App {
                 self.refresh_accounts()?;
             }
             KeyCode::Char(c) => self.add_notes.push(c),
-            KeyCode::Backspace => { self.add_notes.pop(); }
+            KeyCode::Backspace => {
+                self.add_notes.pop();
+            }
             _ => {}
         }
         Ok(())
     }
 
-    fn handle_editing(&mut self, key: KeyEvent, account_id: &str, field: &EditField) -> Result<(), String> {
+    fn handle_editing(
+        &mut self,
+        key: KeyEvent,
+        account_id: &str,
+        field: &EditField,
+    ) -> Result<(), String> {
         match key.code {
             KeyCode::Esc => {
                 self.state = AppState::Unlocked;
@@ -706,12 +766,24 @@ impl App {
                 if let Some(ref vault) = self.vault {
                     let edit_val = self.edit_input.clone();
                     let result = match field {
-                        EditField::ServiceName => vault.update_account(account_id, Some(&edit_val), None, None, None),
-                        EditField::Username => vault.update_account(account_id, None, Some(&edit_val), None, None),
-                        EditField::Password => vault.update_account(account_id, None, None, Some(&edit_val), None),
-                        EditField::Notes => vault.update_account(account_id, None, None, None, Some(Some(&edit_val))),
+                        EditField::ServiceName => {
+                            vault.update_account(account_id, Some(&edit_val), None, None, None)
+                        }
+                        EditField::Username => {
+                            vault.update_account(account_id, None, Some(&edit_val), None, None)
+                        }
+                        EditField::Password => {
+                            vault.update_account(account_id, None, None, Some(&edit_val), None)
+                        }
+                        EditField::Notes => vault.update_account(
+                            account_id,
+                            None,
+                            None,
+                            None,
+                            Some(Some(&edit_val)),
+                        ),
                     };
-                    
+
                     match result {
                         Ok(_) => {
                             // Move to next field or finish
@@ -744,7 +816,8 @@ impl App {
                                     self.state = AppState::Unlocked;
                                     self.refresh_accounts()?;
                                     self.message = "Account updated!".to_string();
-                                    self.message_until = Some(Instant::now() + Duration::from_secs(2));
+                                    self.message_until =
+                                        Some(Instant::now() + Duration::from_secs(2));
                                 }
                             }
                         }
@@ -786,7 +859,9 @@ impl App {
                 self.edit_input.clear();
             }
             KeyCode::Char(c) => self.edit_input.push(c),
-            KeyCode::Backspace => { self.edit_input.pop(); }
+            KeyCode::Backspace => {
+                self.edit_input.pop();
+            }
             _ => {}
         }
         Ok(())
@@ -817,7 +892,9 @@ impl App {
                 self.refresh_accounts()?;
             }
             KeyCode::Char(c) => self.edit_input.push(c),
-            KeyCode::Backspace => { self.edit_input.pop(); }
+            KeyCode::Backspace => {
+                self.edit_input.pop();
+            }
             _ => {}
         }
         Ok(())
@@ -860,14 +937,16 @@ impl App {
 
     fn check_timeouts(&mut self) -> Result<(), String> {
         // Auto-lock check (0 = disabled, applies to all authenticated states)
-        let is_authenticated = !matches!(self.state, AppState::Locked | AppState::ConfirmingPassword | AppState::Quitting);
-        if is_authenticated
-            && self.config.security.auto_lock_minutes > 0 {
-                let auto_lock = Duration::from_secs(self.config.security.auto_lock_minutes as u64 * 60);
-                if self.last_activity.elapsed() >= auto_lock {
-                    self.auto_lock()?;
-                }
+        let is_authenticated = !matches!(
+            self.state,
+            AppState::Locked | AppState::ConfirmingPassword | AppState::Quitting
+        );
+        if is_authenticated && self.config.security.auto_lock_minutes > 0 {
+            let auto_lock = Duration::from_secs(self.config.security.auto_lock_minutes as u64 * 60);
+            if self.last_activity.elapsed() >= auto_lock {
+                self.auto_lock()?;
             }
+        }
 
         // Password show timeout
         if let AppState::ShowingPassword { reveal_until, .. } = self.state {
@@ -932,9 +1011,7 @@ impl App {
                 .map_err(|e| format!("Render error: {}", e))?;
 
             // Handle input with a timeout to allow auto-lock etc.
-            if event::poll(Duration::from_millis(100))
-                .map_err(|e| format!("Event error: {}", e))?
-            {
+            if event::poll(Duration::from_millis(100)).map_err(|e| format!("Event error: {}", e))? {
                 let evt = event::read().map_err(|e| format!("Event error: {}", e))?;
                 if let Event::Key(key) = evt {
                     self.handle_key_event(key)?;
@@ -965,16 +1042,24 @@ impl App {
         match &self.state {
             AppState::Locked => self.render_lock_screen(f, size),
             AppState::ConfirmingPassword => self.render_confirm_password(f, size),
-            AppState::ShowingPassword { account, .. } => self.render_password_screen(f, size, account),
+            AppState::ShowingPassword { account, .. } => {
+                self.render_password_screen(f, size, account)
+            }
             AppState::ShowingHistory => self.render_history_screen(f, size),
             AppState::EditingSettings => self.render_settings(f, size),
-            AppState::AddingService | AppState::AddingUsername | AppState::AddingPassword | AppState::AddingNotes => {
+            AppState::AddingService
+            | AppState::AddingUsername
+            | AppState::AddingPassword
+            | AppState::AddingNotes => {
                 self.render_add_form(f, size);
             }
             AppState::EditingAccount { account_id, field } => {
                 self.render_edit_form(f, size, account_id, field);
             }
-            AppState::ConfirmDelete { account_id, service_name } => {
+            AppState::ConfirmDelete {
+                account_id,
+                service_name,
+            } => {
                 self.render_delete_confirm(f, size, account_id, service_name);
             }
             _ => self.render_main(f, size),
@@ -1111,7 +1196,11 @@ impl App {
         if has_warnings {
             let warn_text = self.integrity_warnings.join(" | ");
             let warning = Paragraph::new(warn_text)
-                .block(Block::default().borders(Borders::ALL).title(" ⚠ Integrity Warning "))
+                .block(
+                    Block::default()
+                        .borders(Borders::ALL)
+                        .title(" ⚠ Integrity Warning "),
+                )
                 .style(Style::default().fg(Color::Yellow).bg(Color::Red))
                 .alignment(Alignment::Center);
             f.render_widget(warning, chunks[0]);
@@ -1141,9 +1230,7 @@ impl App {
                 .border_style(Style::default().fg(Color::Yellow))
                 .style(Style::default().bg(Color::DarkGray))
         } else {
-            Block::default()
-                .borders(Borders::ALL)
-                .title(" Search ")
+            Block::default().borders(Borders::ALL).title(" Search ")
         };
 
         let search = Paragraph::new(search_text)
@@ -1180,11 +1267,21 @@ impl App {
         // Status / message
         let status = if !self.message.is_empty() {
             Span::styled(&self.message, Style::default().fg(Color::Green))
-        } else if let Some(account) = self.list_state.selected().and_then(|i| self.accounts.get(i)) {
+        } else if let Some(account) = self
+            .list_state
+            .selected()
+            .and_then(|i| self.accounts.get(i))
+        {
             let label = if account.deleted_at.is_some() {
-                format!("Selected: {} (created: {}, updated: {}, deleted)", account.service_name, account.created_at, account.updated_at)
+                format!(
+                    "Selected: {} (created: {}, updated: {}, deleted)",
+                    account.service_name, account.created_at, account.updated_at
+                )
             } else {
-                format!("Selected: {} (created: {}, updated: {})", account.service_name, account.created_at, account.updated_at)
+                format!(
+                    "Selected: {} (created: {}, updated: {})",
+                    account.service_name, account.created_at, account.updated_at
+                )
             };
             Span::styled(label, Style::default().fg(Color::Gray))
         } else {
@@ -1203,7 +1300,9 @@ impl App {
         f.render_widget(help, chunks[offset + 3]);
 
         // Status bar
-        let session_short = self.vault.as_ref()
+        let session_short = self
+            .vault
+            .as_ref()
             .map(|v| v.session_id())
             .map(|s| format!("Session: {}", &s[..8.min(s.len())]))
             .unwrap_or_default();
@@ -1396,7 +1495,9 @@ impl App {
         for (i, name) in field_names.iter().enumerate() {
             let is_selected = i == self.settings_selected;
             let field_style = if is_selected {
-                Style::default().fg(Color::Yellow).add_modifier(Modifier::BOLD)
+                Style::default()
+                    .fg(Color::Yellow)
+                    .add_modifier(Modifier::BOLD)
             } else {
                 Style::default().fg(Color::White)
             };
@@ -1407,10 +1508,7 @@ impl App {
                 format!("  {}: {}", name, self.settings_field_value(i))
             };
 
-            f.render_widget(
-                Paragraph::new(text).style(field_style),
-                chunks[i],
-            );
+            f.render_widget(Paragraph::new(text).style(field_style), chunks[i]);
         }
 
         let help = if self.settings_editing {
@@ -1439,8 +1537,12 @@ impl App {
         let has_notes = account.notes.is_some();
         let has_deleted = account.deleted_at.is_some();
         let mut row_count = 5; // username, password, created, updated, timeout
-        if has_notes { row_count += 1; }
-        if has_deleted { row_count += 1; }
+        if has_notes {
+            row_count += 1;
+        }
+        if has_deleted {
+            row_count += 1;
+        }
 
         let mut constraints: Vec<Constraint> = Vec::new();
         for _ in 0..row_count {
@@ -1470,10 +1572,7 @@ impl App {
         row += 1;
 
         if let Some(ref notes) = account.notes {
-            f.render_widget(
-                Paragraph::new(format!("Notes: {}", notes)),
-                chunks[row],
-            );
+            f.render_widget(Paragraph::new(format!("Notes: {}", notes)), chunks[row]);
             row += 1;
         }
 
@@ -1505,8 +1604,7 @@ impl App {
             self.config.ui.show_password_seconds
         );
         f.render_widget(
-            Paragraph::new(timeout_msg)
-                .style(Style::default().fg(Color::Gray)),
+            Paragraph::new(timeout_msg).style(Style::default().fg(Color::Gray)),
             chunks[row],
         );
     }
@@ -1526,7 +1624,8 @@ impl App {
                 .alignment(Alignment::Center);
             f.render_widget(msg, inner_rect);
         } else {
-            let constraints: Vec<Constraint> = self.history_passwords
+            let constraints: Vec<Constraint> = self
+                .history_passwords
                 .iter()
                 .flat_map(|_| vec![Constraint::Length(2), Constraint::Length(1)])
                 .chain(std::iter::once(Constraint::Length(1)))
@@ -1626,10 +1725,7 @@ impl App {
         let chunks = Layout::default()
             .direction(Direction::Vertical)
             .margin(1)
-            .constraints([
-                Constraint::Length(3),
-                Constraint::Length(1),
-            ])
+            .constraints([Constraint::Length(3), Constraint::Length(1)])
             .split(inner_rect);
 
         let field_name = match field {
@@ -1650,7 +1746,13 @@ impl App {
         f.render_widget(help, chunks[1]);
     }
 
-    fn render_delete_confirm(&self, f: &mut Frame, area: Rect, _account_id: &str, service_name: &str) {
+    fn render_delete_confirm(
+        &self,
+        f: &mut Frame,
+        area: Rect,
+        _account_id: &str,
+        service_name: &str,
+    ) {
         let block = Block::default()
             .title(" Delete Account ")
             .borders(Borders::ALL)
@@ -1682,9 +1784,7 @@ impl App {
             chunks[1],
         );
 
-        let help = Paragraph::new("Esc: cancel")
-            .style(Style::default().fg(Color::DarkGray));
+        let help = Paragraph::new("Esc: cancel").style(Style::default().fg(Color::DarkGray));
         f.render_widget(help, chunks[2]);
     }
-
 }

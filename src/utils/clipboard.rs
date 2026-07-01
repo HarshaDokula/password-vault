@@ -17,8 +17,8 @@ pub struct MacClipboard {
 #[cfg(target_os = "macos")]
 impl MacClipboard {
     pub fn new() -> Result<Self, String> {
-        let inner = arboard::Clipboard::new()
-            .map_err(|e| format!("Cannot initialize clipboard: {}", e))?;
+        let inner =
+            arboard::Clipboard::new().map_err(|e| format!("Cannot initialize clipboard: {}", e))?;
         Ok(MacClipboard { inner })
     }
 }
@@ -51,8 +51,8 @@ pub struct LinuxClipboard {
 #[cfg(target_os = "linux")]
 impl LinuxClipboard {
     pub fn new() -> Result<Self, String> {
-        let inner = arboard::Clipboard::new()
-            .map_err(|e| format!("Cannot initialize clipboard: {}", e))?;
+        let inner =
+            arboard::Clipboard::new().map_err(|e| format!("Cannot initialize clipboard: {}", e))?;
         Ok(LinuxClipboard { inner })
     }
 }

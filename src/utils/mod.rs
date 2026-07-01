@@ -62,12 +62,12 @@ mod tests {
     #[test]
     fn test_rate_limiter() {
         let mut limiter = RateLimiter::new(3);
-        
+
         assert_eq!(limiter.record_attempt("user"), 2);
         assert_eq!(limiter.record_attempt("user"), 1);
         assert_eq!(limiter.record_attempt("user"), 0);
         assert_eq!(limiter.record_attempt("user"), 0); // rate limited
-        
+
         // Different key not affected
         assert_eq!(limiter.remaining_attempts("other"), 3);
     }

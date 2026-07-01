@@ -1,7 +1,7 @@
+use chrono::Utc;
 use std::fs::{File, OpenOptions};
 use std::io::{BufRead, BufReader, Write};
 use std::path::Path;
-use chrono::Utc;
 use uuid::Uuid;
 
 use crate::crypto;
@@ -72,7 +72,8 @@ impl IntegrityLog {
         file.write_all(line.as_bytes())
             .map_err(|e| format!("Cannot write to audit log: {}", e))?;
 
-        file.flush().map_err(|e| format!("Cannot flush audit log: {}", e))?;
+        file.flush()
+            .map_err(|e| format!("Cannot flush audit log: {}", e))?;
 
         Ok(entry_hash)
     }
@@ -86,7 +87,7 @@ impl IntegrityLog {
 
         let file = File::open(path).map_err(|e| format!("Cannot open audit log: {}", e))?;
         let reader = BufReader::new(file);
-        
+
         let mut last_hash = String::new();
         for line in reader.lines() {
             let line = line.map_err(|e| format!("Cannot read audit log: {}", e))?;
@@ -118,7 +119,11 @@ impl IntegrityLog {
             let parts: Vec<&str> = line.split('|').collect();
 
             if parts.len() != 8 {
-                return Err(format!("Line {} has {} fields, expected 8", line_num, parts.len()));
+                return Err(format!(
+                    "Line {} has {} fields, expected 8",
+                    line_num,
+                    parts.len()
+                ));
             }
 
             let id = parts[0];
@@ -168,16 +173,18 @@ mod tests {
     fn test_audit_log_append_and_verify() {
         let tmp = "/tmp/test_audit.log";
         let _ = fs::remove_file(tmp);
-        
+
         let log = IntegrityLog::open(tmp).unwrap();
-        
+
         let session_id = "test-session-1";
-        
-        log.append(EventType::VaultInit, session_id, None, None).unwrap();
-        log.append(EventType::AppStart, session_id, None, None).unwrap();
-        
+
+        log.append(EventType::VaultInit, session_id, None, None)
+            .unwrap();
+        log.append(EventType::AppStart, session_id, None, None)
+            .unwrap();
+
         assert!(log.verify().is_ok());
-        
+
         let _ = fs::remove_file(tmp);
     }
 
@@ -185,21 +192,28 @@ mod tests {
     fn test_audit_log_tamper_detection() {
         let tmp = "/tmp/test_audit_tamper.log";
         let _ = fs::remove_file(tmp);
-        
+
         let log = IntegrityLog::open(tmp).unwrap();
         let session_id = "test-session-2";
-        
-        log.append(EventType::VaultInit, session_id, None, None).unwrap();
-        log.append(EventType::AccountCreate, session_id, Some("acc1"), Some("{}")).unwrap();
-        
+
+        log.append(EventType::VaultInit, session_id, None, None)
+            .unwrap();
+        log.append(
+            EventType::AccountCreate,
+            session_id,
+            Some("acc1"),
+            Some("{}"),
+        )
+        .unwrap();
+
         // Tamper: modify the file
         let content = fs::read_to_string(tmp).unwrap();
         let tampered = content.replace("account_create", "account_update");
         fs::write(tmp, tampered).unwrap();
-        
+
         let log2 = IntegrityLog::open(tmp).unwrap();
         assert!(log2.verify().is_err());
-        
+
         let _ = fs::remove_file(tmp);
     }
 }

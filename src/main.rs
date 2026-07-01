@@ -28,7 +28,7 @@ fn main() {
 
     // Otherwise run TUI mode
     let vault_dir = config::get_vault_dir();
-    
+
     // Ensure vault directory exists
     if let Err(e) = config::ensure_vault_dir(&vault_dir) {
         eprintln!("Error: {}", e);

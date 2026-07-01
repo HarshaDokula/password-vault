@@ -5,7 +5,9 @@ use uuid::Uuid;
 use crate::audit::IntegrityLog;
 use crate::crypto;
 use crate::db;
-use crate::models::{Account, AccountSummary, AuditEntry, EventType, PasswordHistoryEntry, AppConfig};
+use crate::models::{
+    Account, AccountSummary, AppConfig, AuditEntry, EventType, PasswordHistoryEntry,
+};
 
 /// The core vault service that orchestrates all operations.
 pub struct Vault {
@@ -71,9 +73,10 @@ impl Vault {
         }
 
         // Verify database integrity
-        match self.db.query_row("PRAGMA integrity_check", [], |row| {
-            row.get::<_, String>(0)
-        }) {
+        match self
+            .db
+            .query_row("PRAGMA integrity_check", [], |row| row.get::<_, String>(0))
+        {
             Ok(result) => {
                 if result != "ok" {
                     issues.push(format!("Database integrity issue: {}", result));
@@ -151,7 +154,9 @@ impl Vault {
 
         let encrypted_username = crypto::encrypt_string(&self.master_key, username)?;
         let encrypted_password = crypto::encrypt_string(&self.master_key, password)?;
-        let encrypted_notes = notes.map(|n| crypto::encrypt_string(&self.master_key, n)).transpose()?;
+        let encrypted_notes = notes
+            .map(|n| crypto::encrypt_string(&self.master_key, n))
+            .transpose()?;
 
         let account = Account {
             id: id.clone(),
@@ -190,8 +195,8 @@ impl Vault {
         password: Option<&str>,
         notes: Option<Option<&str>>,
     ) -> Result<Account, String> {
-        let mut account = db::get_account(&self.db, id)?
-            .ok_or_else(|| format!("Account {} not found", id))?;
+        let mut account =
+            db::get_account(&self.db, id)?.ok_or_else(|| format!("Account {} not found", id))?;
 
         if account.deleted_at.is_some() {
             return Err("Cannot update a deleted account".to_string());
@@ -244,8 +249,8 @@ impl Vault {
 
     /// Soft-delete an account.
     pub fn delete_account(&self, id: &str) -> Result<(), String> {
-        let account = db::get_account(&self.db, id)?
-            .ok_or_else(|| format!("Account {} not found", id))?;
+        let account =
+            db::get_account(&self.db, id)?.ok_or_else(|| format!("Account {} not found", id))?;
 
         if account.deleted_at.is_some() {
             return Err("Account already deleted".to_string());
@@ -266,8 +271,8 @@ impl Vault {
 
     /// Get an account by ID with its passwords decrypted.
     pub fn get_account_decrypted(&self, id: &str) -> Result<DecryptedAccount, String> {
-        let account = db::get_account(&self.db, id)?
-            .ok_or_else(|| format!("Account {} not found", id))?;
+        let account =
+            db::get_account(&self.db, id)?.ok_or_else(|| format!("Account {} not found", id))?;
 
         let username = crypto::decrypt_string(&self.master_key, &account.username)?;
         let password = crypto::decrypt_string(&self.master_key, &account.password)?;
@@ -350,7 +355,6 @@ impl Vault {
     pub fn log_backup_import(&self) -> Result<(), String> {
         self.log_event(EventType::BackupImport, None, None)
     }
-
 }
 
 /// A decrypted account for display.
@@ -388,10 +392,17 @@ mod tests {
     #[test]
     fn test_create_and_read_account() {
         let vault = setup_vault();
-        
-        let account = vault.create_account("github", "user@example.com", "mypassword", Some("personal account")).unwrap();
+
+        let account = vault
+            .create_account(
+                "github",
+                "user@example.com",
+                "mypassword",
+                Some("personal account"),
+            )
+            .unwrap();
         assert_eq!(account.service_name, "github");
-        
+
         let decrypted = vault.get_account_decrypted(&account.id).unwrap();
         assert_eq!(decrypted.username, "user@example.com");
         assert_eq!(decrypted.password, "mypassword");
@@ -401,14 +412,18 @@ mod tests {
     #[test]
     fn test_update_account() {
         let vault = setup_vault();
-        let account = vault.create_account("github", "user", "pass1", None).unwrap();
-        
-        let _updated = vault.update_account(&account.id, None, Some("newuser"), Some("pass2"), None).unwrap();
-        
+        let account = vault
+            .create_account("github", "user", "pass1", None)
+            .unwrap();
+
+        let _updated = vault
+            .update_account(&account.id, None, Some("newuser"), Some("pass2"), None)
+            .unwrap();
+
         let decrypted = vault.get_account_decrypted(&account.id).unwrap();
         assert_eq!(decrypted.username, "newuser");
         assert_eq!(decrypted.password, "pass2");
-        
+
         // Check history: pass1 should be in history
         let history = vault.get_password_history_decrypted(&account.id).unwrap();
         assert_eq!(history.len(), 1);
@@ -419,13 +434,13 @@ mod tests {
     fn test_delete_account() {
         let vault = setup_vault();
         let account = vault.create_account("test", "user", "pass", None).unwrap();
-        
+
         vault.delete_account(&account.id).unwrap();
-        
+
         // Should not appear in search
         let results = vault.search_accounts("test").unwrap();
         assert_eq!(results.len(), 0);
-        
+
         // Should appear in search when including deleted
         let results = vault.search_all_accounts("test").unwrap();
         assert_eq!(results.len(), 1);
@@ -437,10 +452,10 @@ mod tests {
         vault.create_account("GitHub", "a", "b", None).unwrap();
         vault.create_account("GitLab", "c", "d", None).unwrap();
         vault.create_account("Twitter", "e", "f", None).unwrap();
-        
+
         let results = vault.search_accounts("git").unwrap();
         assert_eq!(results.len(), 2);
-        
+
         let results = vault.search_accounts("twitter").unwrap();
         assert_eq!(results.len(), 1);
     }
@@ -449,13 +464,21 @@ mod tests {
     fn test_password_history_pruning() {
         let vault = setup_vault();
         let account = vault.create_account("test", "u", "pass1", None).unwrap();
-        
+
         // Change password 5 times
-        vault.update_account(&account.id, None, None, Some("pass2"), None).unwrap();
-        vault.update_account(&account.id, None, None, Some("pass3"), None).unwrap();
-        vault.update_account(&account.id, None, None, Some("pass4"), None).unwrap();
-        vault.update_account(&account.id, None, None, Some("pass5"), None).unwrap();
-        
+        vault
+            .update_account(&account.id, None, None, Some("pass2"), None)
+            .unwrap();
+        vault
+            .update_account(&account.id, None, None, Some("pass3"), None)
+            .unwrap();
+        vault
+            .update_account(&account.id, None, None, Some("pass4"), None)
+            .unwrap();
+        vault
+            .update_account(&account.id, None, None, Some("pass5"), None)
+            .unwrap();
+
         // Should only have 3 history entries (oldest pruned)
         let history = vault.get_password_history_decrypted(&account.id).unwrap();
         assert_eq!(history.len(), 3);
