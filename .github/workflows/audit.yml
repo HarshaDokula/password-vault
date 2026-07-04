@@ -8,6 +8,11 @@ on:
   schedule:
     - cron: '0 8 * * 1' # every Monday at 08:00 UTC
 
+# Cancel in-progress runs when a new commit is pushed
+concurrency:
+  group: ${{ github.workflow }}-${{ github.ref }}
+  cancel-in-progress: true
+
 jobs:
   cargo-audit:
     name: Cargo Audit
@@ -16,11 +21,13 @@ jobs:
     steps:
       - uses: actions/checkout@v4
 
-      - name: Cache cargo registry
-        uses: Swatinem/rust-cache@v2
+      - name: Install cargo-binstall
+        uses: taiki-e/install-action@v2
+        with:
+          tool: cargo-binstall
 
-      - name: Install cargo-audit
-        run: cargo install cargo-audit --locked
+      - name: Install cargo-audit (pre-built binary)
+        run: cargo binstall --no-confirm cargo-audit
 
       - name: Run security audit
         run: cargo audit
