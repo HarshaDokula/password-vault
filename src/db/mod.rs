@@ -334,6 +334,7 @@ pub fn insert_audit_entry(conn: &Connection, entry: &AuditEntry) -> Result<(), S
 mod tests {
     use super::*;
     use std::fs;
+    use uuid::Uuid;
 
     fn temp_test_db_path() -> String {
         let dir = std::env::temp_dir();

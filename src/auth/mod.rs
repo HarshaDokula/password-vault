@@ -114,6 +114,7 @@ pub fn get_or_create_salt(conn: &Connection) -> Result<Vec<u8>, String> {
 mod tests {
     use super::*;
     use std::fs;
+    use uuid::Uuid;
 
     fn temp_path(prefix: &str) -> String {
         std::env::temp_dir()
