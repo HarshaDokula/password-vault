@@ -42,6 +42,40 @@ impl ClipboardProvider for MacClipboard {
     }
 }
 
+/// Windows clipboard provider using arboard.
+#[cfg(target_os = "windows")]
+pub struct WindowsClipboard {
+    inner: arboard::Clipboard,
+}
+
+#[cfg(target_os = "windows")]
+impl WindowsClipboard {
+    pub fn new() -> Result<Self, String> {
+        let inner =
+            arboard::Clipboard::new().map_err(|e| format!("Cannot initialize clipboard: {}", e))?;
+        Ok(WindowsClipboard { inner })
+    }
+}
+
+#[cfg(target_os = "windows")]
+impl ClipboardProvider for WindowsClipboard {
+    fn copy_to_clipboard(&mut self, text: &str) -> Result<(), String> {
+        self.inner
+            .set_text(text)
+            .map_err(|e| format!("Clipboard error: {}", e))
+    }
+
+    fn clear_clipboard(&mut self) -> Result<(), String> {
+        self.inner
+            .set_text("")
+            .map_err(|e| format!("Clipboard error: {}", e))
+    }
+
+    fn is_supported(&self) -> bool {
+        true
+    }
+}
+
 /// Linux clipboard provider using arboard.
 #[cfg(target_os = "linux")]
 pub struct LinuxClipboard {
@@ -76,18 +110,18 @@ impl ClipboardProvider for LinuxClipboard {
     }
 }
 
-/// Unsupported platform clipboard (no-op).
-#[cfg(not(any(target_os = "macos", target_os = "linux")))]
+/// Unsupported platform clipboard (no-op) for platforms without arboard support.
+#[cfg(not(any(target_os = "macos", target_os = "linux", target_os = "windows")))]
 pub struct UnsupportedClipboard;
 
-#[cfg(not(any(target_os = "macos", target_os = "linux")))]
+#[cfg(not(any(target_os = "macos", target_os = "linux", target_os = "windows")))]
 impl UnsupportedClipboard {
     pub fn new() -> Result<Self, String> {
         Ok(UnsupportedClipboard)
     }
 }
 
-#[cfg(not(any(target_os = "macos", target_os = "linux")))]
+#[cfg(not(any(target_os = "macos", target_os = "linux", target_os = "windows")))]
 impl ClipboardProvider for UnsupportedClipboard {
     fn copy_to_clipboard(&mut self, _text: &str) -> Result<(), String> {
         Err("Clipboard unsupported on this platform.".to_string())
@@ -112,7 +146,11 @@ pub fn create_clipboard() -> Result<Box<dyn ClipboardProvider>, String> {
     {
         LinuxClipboard::new().map(|c| Box::new(c) as Box<dyn ClipboardProvider>)
     }
-    #[cfg(not(any(target_os = "macos", target_os = "linux")))]
+    #[cfg(target_os = "windows")]
+    {
+        WindowsClipboard::new().map(|c| Box::new(c) as Box<dyn ClipboardProvider>)
+    }
+    #[cfg(not(any(target_os = "macos", target_os = "linux", target_os = "windows")))]
     {
         UnsupportedClipboard::new().map(|c| Box::new(c) as Box<dyn ClipboardProvider>)
     }

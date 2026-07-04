@@ -171,14 +171,21 @@ mod tests {
     use std::path::Path;
     use uuid::Uuid;
 
-    fn setup_test_vault() -> Vault {
-        let db_path = "/tmp/test_storage_vault.db";
-        let audit_path = "/tmp/test_storage_audit.log";
-        let _ = fs::remove_file(db_path);
-        let _ = fs::remove_file(audit_path);
+    fn temp_path(prefix: &str) -> String {
+        std::env::temp_dir()
+            .join(format!("{}_{}", prefix, uuid::Uuid::new_v4()))
+            .to_string_lossy()
+            .to_string()
+    }
 
-        let conn = db::open(db_path).unwrap();
-        let integrity_log = IntegrityLog::open(audit_path).unwrap();
+    fn setup_test_vault() -> Vault {
+        let db_path = temp_path("test_storage_vault");
+        let audit_path = temp_path("test_storage_audit");
+        let _ = fs::remove_file(&db_path);
+        let _ = fs::remove_file(&audit_path);
+
+        let conn = db::open(&db_path).unwrap();
+        let integrity_log = IntegrityLog::open(&audit_path).unwrap();
         let master_key = crypto::generate_random_key();
         let session_id = Uuid::new_v4().to_string();
         let config = AppConfig::default();
@@ -196,18 +203,18 @@ mod tests {
             .create_account("gitlab", "admin", "secret", Some("notes"))
             .unwrap();
 
-        let export_path = "/tmp/test_backup.vlt";
-        let audit_path = "/tmp/test_storage_audit.log";
-        let _ = fs::remove_file(export_path);
+        let export_path = temp_path("test_backup");
+        let audit_path = temp_path("test_storage_audit");
+        let _ = fs::remove_file(&export_path);
 
-        export_vault(&vault, audit_path, export_path).unwrap();
-        assert!(Path::new(export_path).exists());
+        export_vault(&vault, &audit_path, &export_path).unwrap();
+        assert!(Path::new(&export_path).exists());
 
         // Create a fresh vault and import
         let vault2 = setup_test_vault();
-        let audit_path2 = "/tmp/test_storage2_audit.log";
-        let _ = fs::remove_file(audit_path2);
-        let count = import_vault(&vault2, audit_path2, export_path).unwrap();
+        let audit_path2 = temp_path("test_storage2_audit");
+        let _ = fs::remove_file(&audit_path2);
+        let count = import_vault(&vault2, &audit_path2, &export_path).unwrap();
         assert_eq!(count, 2);
 
         let results = vault2.search_accounts("git").unwrap();

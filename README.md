@@ -2,6 +2,8 @@
 
 A local-first, terminal-based password manager written in Rust. Lightweight, secure, and keyboard-driven.
 
+**Supports Linux, macOS, and Windows.**
+
 ## Features
 
 - **AES-grade encryption** — XChaCha20-Poly1305 for all secrets (username, password, notes)
@@ -10,7 +12,7 @@ A local-first, terminal-based password manager written in Rust. Lightweight, sec
 - **Password history** — Retains current password + 3 previous (max 4 states)
 - **Auto-lock** — Locks after configurable inactivity period (default 15 min)
 - **Rate limiting** — 5 attempts/minute on master password
-- **Clipboard security** — Auto-clears after configurable timeout (default 20s)
+- **Cross-platform clipboard** — Supported on Linux, macOS, and Windows (auto-clears after configurable timeout, default 20s)
 - **Soft delete** — Accounts are marked deleted, never truly gone
 - **Encrypted backups** — `.vlt` format (encrypted tar with metadata)
 - **Integrity verification** — `vault verify` checks the hash chain and database
@@ -274,7 +276,7 @@ VAULT_DIR=/tmp/test-vault cargo run
 | Crypto | `argon2` 0.5, `chacha20poly1305` 0.10, `sha2` 0.10, `zeroize` 1, `rand` 0.8 |
 | Storage | `rusqlite` 0.31 (bundled SQLite), `serde` + `serde_json`, `toml` 0.8 |
 | Backup | `tar` 0.4, `flate2` 1, `base64` 0.22 |
-| Platform | `directories` 5, `arboard` 3.6, `signal-hook` 0.3 |
+| Platform | `directories` 5, `arboard` 3.6 |
 | Utilities | `uuid` 1 (v4), `chrono` 0.4 (serde) |
 
 ## License

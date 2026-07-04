@@ -78,8 +78,16 @@ pub fn get_vault_dir() -> String {
 }
 
 fn dirs_fallback() -> String {
-    let home = std::env::var("HOME").unwrap_or_else(|_| ".".to_string());
-    format!("{}/.vault", home)
+    #[cfg(target_os = "windows")]
+    {
+        let appdata = std::env::var("APPDATA").unwrap_or_else(|_| ".".to_string());
+        format!("{}\\.vault", appdata)
+    }
+    #[cfg(not(target_os = "windows"))]
+    {
+        let home = std::env::var("HOME").unwrap_or_else(|_| ".".to_string());
+        format!("{}/.vault", home)
+    }
 }
 
 /// Ensure the vault directory exists.

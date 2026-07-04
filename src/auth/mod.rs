@@ -115,8 +115,15 @@ mod tests {
     use super::*;
     use std::fs;
 
+    fn temp_path(prefix: &str) -> String {
+        std::env::temp_dir()
+            .join(format!("{}_{}", prefix, uuid::Uuid::new_v4()))
+            .to_string_lossy()
+            .to_string()
+    }
+
     fn setup_test_db() -> (Connection, String) {
-        let path = format!("/tmp/test_auth_vault_{}.db", uuid::Uuid::new_v4());
+        let path = temp_path("test_auth_vault");
         let _ = fs::remove_file(&path);
         (db::open(&path).unwrap(), path)
     }
@@ -165,9 +172,9 @@ mod tests {
         let _ = fs::remove_file(&db_path);
 
         let salt = crypto::generate_salt().to_vec();
-        let audit_path = "/tmp/test_auth_rate_limit_audit.log";
-        let _ = fs::remove_file(audit_path);
-        let il = IntegrityLog::open(audit_path).unwrap();
+        let audit_path = temp_path("test_auth_rate_limit_audit");
+        let _ = fs::remove_file(&audit_path);
+        let il = IntegrityLog::open(&audit_path).unwrap();
 
         // Create vault
         let _ = authenticate(

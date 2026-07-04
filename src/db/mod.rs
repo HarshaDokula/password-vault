@@ -335,10 +335,17 @@ mod tests {
     use super::*;
     use std::fs;
 
+    fn temp_test_db_path() -> String {
+        let dir = std::env::temp_dir();
+        dir.join(format!("test_vault_{}.db", uuid::Uuid::new_v4()))
+            .to_string_lossy()
+            .to_string()
+    }
+
     fn setup_test_db() -> Connection {
-        let path = "/tmp/test_vault.db";
-        let _ = fs::remove_file(path);
-        open(path).unwrap()
+        let path = temp_test_db_path();
+        let _ = fs::remove_file(&path);
+        open(&path).unwrap()
     }
 
     #[test]

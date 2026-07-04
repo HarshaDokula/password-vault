@@ -18,6 +18,9 @@ jobs:
           - os: macos-latest
             target: x86_64-apple-darwin
             artifact: vault-macos-x86_64
+          - os: windows-latest
+            target: x86_64-pc-windows-msvc
+            artifact: vault-windows-x86_64
 
     steps:
       - uses: actions/checkout@v4
@@ -33,16 +36,32 @@ jobs:
       - name: Build release
         run: cargo build --release --target ${{ matrix.target }} --verbose
 
-      - name: Package artifact
+      - name: Package artifact (Windows)
+        if: runner.os == 'Windows'
+        shell: bash
+        run: |
+          cd target/${{ matrix.target }}/release
+          7z a ${{ matrix.artifact }}.zip vault.exe
+
+      - name: Package artifact (Unix)
+        if: runner.os != 'Windows'
         run: |
           cd target/${{ matrix.target }}/release
           tar czf ${{ matrix.artifact }}.tar.gz vault
 
-      - name: Upload artifact
+      - name: Upload artifact (Unix)
+        if: runner.os != 'Windows'
         uses: actions/upload-artifact@v4
         with:
           name: ${{ matrix.artifact }}
           path: target/${{ matrix.target }}/release/${{ matrix.artifact }}.tar.gz
+
+      - name: Upload artifact (Windows)
+        if: runner.os == 'Windows'
+        uses: actions/upload-artifact@v4
+        with:
+          name: ${{ matrix.artifact }}
+          path: target/${{ matrix.target }}/release/${{ matrix.artifact }}.zip
 
   release:
     name: Create Release
@@ -61,4 +80,5 @@ jobs:
           files: |
             vault-linux-x86_64/vault-linux-x86_64.tar.gz
             vault-macos-x86_64/vault-macos-x86_64.tar.gz
+            vault-windows-x86_64/vault-windows-x86_64.zip
           generate_release_notes: true

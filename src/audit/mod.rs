@@ -169,12 +169,19 @@ mod tests {
     use super::*;
     use std::fs;
 
+    fn temp_path(prefix: &str) -> String {
+        std::env::temp_dir()
+            .join(format!("{}_{}", prefix, uuid::Uuid::new_v4()))
+            .to_string_lossy()
+            .to_string()
+    }
+
     #[test]
     fn test_audit_log_append_and_verify() {
-        let tmp = "/tmp/test_audit.log";
-        let _ = fs::remove_file(tmp);
+        let tmp = temp_path("test_audit");
+        let _ = fs::remove_file(&tmp);
 
-        let log = IntegrityLog::open(tmp).unwrap();
+        let log = IntegrityLog::open(&tmp).unwrap();
 
         let session_id = "test-session-1";
 
@@ -190,10 +197,10 @@ mod tests {
 
     #[test]
     fn test_audit_log_tamper_detection() {
-        let tmp = "/tmp/test_audit_tamper.log";
-        let _ = fs::remove_file(tmp);
+        let tmp = temp_path("test_audit_tamper");
+        let _ = fs::remove_file(&tmp);
 
-        let log = IntegrityLog::open(tmp).unwrap();
+        let log = IntegrityLog::open(&tmp).unwrap();
         let session_id = "test-session-2";
 
         log.append(EventType::VaultInit, session_id, None, None)
