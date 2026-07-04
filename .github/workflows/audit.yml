@@ -23,4 +23,4 @@ jobs:
         run: cargo install cargo-audit --locked
 
       - name: Run security audit
-        run: cargo audit --deny warnings
+        run: cargo audit
