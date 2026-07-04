@@ -118,7 +118,7 @@ mod tests {
 
     fn temp_path(prefix: &str) -> String {
         std::env::temp_dir()
-            .join(format!("{}_{}", prefix, uuid::Uuid::new_v4()))
+            .join(format!("{}_{}", prefix, Uuid::new_v4()))
             .to_string_lossy()
             .to_string()
     }
@@ -199,12 +199,12 @@ mod tests {
         }
 
         // Verify the log entry was written
-        let content = std::fs::read_to_string(audit_path).unwrap();
+        let content = std::fs::read_to_string(&audit_path).unwrap();
         assert!(
             content.contains("rate_limit_triggered"),
             "Expected rate_limit_triggered in audit log"
         );
 
-        let _ = fs::remove_file(audit_path);
+        let _ = fs::remove_file(&audit_path);
     }
 }

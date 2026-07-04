@@ -338,7 +338,7 @@ mod tests {
 
     fn temp_test_db_path() -> String {
         let dir = std::env::temp_dir();
-        dir.join(format!("test_vault_{}.db", uuid::Uuid::new_v4()))
+        dir.join(format!("test_vault_{}.db", Uuid::new_v4()))
             .to_string_lossy()
             .to_string()
     }

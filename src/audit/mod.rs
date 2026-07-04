@@ -214,13 +214,13 @@ mod tests {
         .unwrap();
 
         // Tamper: modify the file
-        let content = fs::read_to_string(tmp).unwrap();
+        let content = fs::read_to_string(&tmp).unwrap();
         let tampered = content.replace("account_create", "account_update");
-        fs::write(tmp, tampered).unwrap();
+        fs::write(&tmp, tampered).unwrap();
 
-        let log2 = IntegrityLog::open(tmp).unwrap();
+        let log2 = IntegrityLog::open(&tmp).unwrap();
         assert!(log2.verify().is_err());
 
-        let _ = fs::remove_file(tmp);
+        let _ = fs::remove_file(&tmp);
     }
 }
