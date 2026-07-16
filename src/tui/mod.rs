@@ -1,6 +1,6 @@
 use crossterm::{
     event::{
-        self, DisableMouseCapture, EnableMouseCapture, Event, KeyCode, KeyEvent, KeyModifiers,
+        self, DisableMouseCapture, EnableMouseCapture, Event, KeyCode, KeyEvent, KeyEventKind, KeyModifiers,
     },
     execute,
     terminal::{disable_raw_mode, enable_raw_mode, EnterAlternateScreen, LeaveAlternateScreen},
@@ -1014,7 +1014,9 @@ impl App {
             if event::poll(Duration::from_millis(100)).map_err(|e| format!("Event error: {}", e))? {
                 let evt = event::read().map_err(|e| format!("Event error: {}", e))?;
                 if let Event::Key(key) = evt {
-                    self.handle_key_event(key)?;
+                    if key.kind == KeyEventKind::Press {
+                        self.handle_key_event(key)?;
+                    }
                 }
             }
 
