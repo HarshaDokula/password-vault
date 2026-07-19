@@ -16,7 +16,11 @@ The script auto-detects your platform and architecture, downloads the latest rel
 
 ### Windows
 
-Download `vault-windows-x86_64.zip` from the [latest release](https://github.com/HarshaDokula/password-vault/releases/latest) and extract `vault.exe` to a directory in your `PATH`.
+```powershell
+powershell -c "irm https://raw.githubusercontent.com/HarshaDokula/password-vault/main/install.ps1 | iex"
+```
+
+This installs `vault.exe` to `%LOCALAPPDATA%\vault` and adds it to your user `PATH`.
 
 ### Build from source
 
