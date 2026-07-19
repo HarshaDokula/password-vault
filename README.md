@@ -2,7 +2,30 @@
 
 A local-first, terminal-based password manager written in Rust. Lightweight, secure, and keyboard-driven.
 
-**Supports Linux, macOS, and Windows.**
+**Supports Linux, macOS, and Windows (x86_64 & Apple Silicon).**
+
+## Installation
+
+### macOS & Linux
+
+```bash
+curl -fsSL https://raw.githubusercontent.com/HarshaDokula/password-vault/main/install.sh | bash
+```
+
+The script auto-detects your platform and architecture, downloads the latest release, and installs to `/usr/local/bin`.
+
+### Windows
+
+Download `vault-windows-x86_64.zip` from the [latest release](https://github.com/HarshaDokula/password-vault/releases/latest) and extract `vault.exe` to a directory in your `PATH`.
+
+### Build from source
+
+```bash
+git clone https://github.com/HarshaDokula/password-vault.git
+cd password-vault
+cargo build --release
+./target/release/vault
+```
 
 ## Features
 
@@ -22,17 +45,6 @@ A local-first, terminal-based password manager written in Rust. Lightweight, sec
 - **Zero cloud dependencies** — Everything stays local
 
 ## Quick Start
-
-```bash
-# Build
-cargo build --release
-
-# Set vault location (optional, defaults to platform data dir)
-export VAULT_DIR=~/.vault
-
-# Launch the TUI
-./target/release/vault
-```
 
 **First launch**: enter a strong master password, then confirm it (typed twice) to create your vault.  
 **Existing vault**: enter the same password to unlock.
