@@ -81,8 +81,15 @@ vault init              # Initialize a new vault directory
 vault verify            # Verify hash chain and database integrity
 vault export <file>     # Export encrypted backup
 vault import <file>     # Import from backup
+vault uninstall         # Remove the vault binary (keeps your passwords)
+vault uninstall --delete-data   # Remove binary AND all stored passwords
 vault                   # Launch TUI (no arguments)
 ```
+
+`vault uninstall` removes the binary wherever it was installed from (e.g. `/usr/local/bin/vault`).
+Use `--delete-data` (or `-d`) to also permanently delete your vault data (passwords) — it asks
+for confirmation unless you pass `--yes` (`-y`). If the binary lives in a root-owned location,
+finish removal with the `sudo rm` command it prints.
 
 ## Configuration
 

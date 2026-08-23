@@ -31,6 +31,12 @@ pub fn run_cli(args: &[String]) -> Result<(), String> {
         "verify" => {
             cmd_verify(&db_path, &audit_path)?;
         }
+        "uninstall" => {
+            let (delete_data, assume_yes) = parse_uninstall_flags(&args[2..])?;
+            let binary_path = std::env::current_exe()
+                .map_err(|e| format!("Could not determine vault binary path: {}", e))?;
+            cmd_uninstall(delete_data, assume_yes, &vault_dir, &binary_path)?;
+        }
         "export" => {
             let output = if args.len() > 2 {
                 args[2].clone()
@@ -67,6 +73,100 @@ fn print_cli_usage() {
     println!("  vault verify       Verify integrity of the vault");
     println!("  vault export <file>  Export vault to encrypted backup");
     println!("  vault import <file>  Import vault from encrypted backup");
+    println!("  vault uninstall    Remove the vault binary (keeps your passwords)");
+    println!("      --delete-data, -d  Also delete all stored passwords");
+    println!("      --yes, -y          Skip the confirmation prompt");
+}
+
+/// Parse uninstall flags. Returns (delete_data, assume_yes).
+fn parse_uninstall_flags(args: &[String]) -> Result<(bool, bool), String> {
+    let mut delete_data = false;
+    let mut assume_yes = false;
+    for arg in args {
+        match arg.as_str() {
+            "--delete-data" | "-d" => delete_data = true,
+            "--yes" | "-y" => assume_yes = true,
+            "--help" | "-h" => {
+                print_cli_usage();
+                return Err("No action taken.".to_string());
+            }
+            _ => {
+                return Err(format!(
+                    "Unknown uninstall flag: {} (use --delete-data/-d and/or --yes/-y)",
+                    arg
+                ));
+            }
+        }
+    }
+    Ok((delete_data, assume_yes))
+}
+
+/// Uninstall vault: remove the binary, and optionally the vault data (passwords).
+fn cmd_uninstall(
+    delete_data: bool,
+    assume_yes: bool,
+    vault_dir: &str,
+    binary_path: &Path,
+) -> Result<(), String> {
+    println!("=== Vault Uninstall ===");
+    let data_dir = Path::new(vault_dir);
+
+    // For destructive uninstalls, confirm BEFORE removing anything.
+    if delete_data && !assume_yes {
+        print!(
+            "WARNING: This will PERMANENTLY delete all stored passwords in {}.\nContinue? [y/N] ",
+            data_dir.display()
+        );
+        io::stdout()
+            .flush()
+            .map_err(|e| format!("IO error: {}", e))?;
+        let mut answer = String::new();
+        io::stdin()
+            .read_line(&mut answer)
+            .map_err(|e| format!("IO error: {}", e))?;
+        if !matches!(answer.trim().to_lowercase().as_str(), "y" | "yes") {
+            println!("Aborted — nothing was removed.");
+            return Ok(());
+        }
+    }
+
+    // Remove the binary. On Unix, deleting a running executable works fine;
+    // a root-owned install (e.g. /usr/local/bin) needs sudo.
+    match std::fs::remove_file(binary_path) {
+        Ok(()) => println!("[OK] Removed binary: {}", binary_path.display()),
+        Err(e) if e.kind() == std::io::ErrorKind::PermissionDenied => {
+            println!("[WARN] Cannot remove {}: {}", binary_path.display(), e);
+            #[cfg(target_os = "windows")]
+            println!("       Close vault, then delete: {}", binary_path.display());
+            #[cfg(not(target_os = "windows"))]
+            println!(
+                "       Finish removal with: sudo rm {}",
+                binary_path.display()
+            );
+        }
+        Err(e) => println!("[WARN] Could not remove {}: {}", binary_path.display(), e),
+    }
+
+    // Remove vault data (passwords) if requested.
+    if delete_data {
+        if data_dir.exists() {
+            std::fs::remove_dir_all(data_dir).map_err(|e| {
+                format!("Failed to remove vault data {}: {}", data_dir.display(), e)
+            })?;
+            println!("[OK] Deleted vault data: {}", data_dir.display());
+        } else {
+            println!("[SKIP] No vault data found at {}", data_dir.display());
+        }
+    } else {
+        println!("[KEEP] Vault data retained at {}", data_dir.display());
+        println!(
+            "       Run 'vault uninstall --delete-data' to also delete your stored passwords."
+        );
+    }
+
+    println!();
+    println!("Uninstall finished.");
+    Ok(())
 }
 
 fn cmd_verify(db_path: &Path, audit_path: &Path) -> Result<(), String> {
@@ -228,4 +328,79 @@ fn cmd_init(vault_dir: &str) -> Result<(), String> {
     println!("Run 'vault' to create your master password and start adding accounts.");
 
     Ok(())
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    fn flags(args: &[&str]) -> Vec<String> {
+        args.iter().map(|s| s.to_string()).collect()
+    }
+
+    #[test]
+    fn parse_uninstall_flags_default_keeps_data() {
+        let (delete_data, assume_yes) = parse_uninstall_flags(&flags(&[])).unwrap();
+        assert!(!delete_data);
+        assert!(!assume_yes);
+    }
+
+    #[test]
+    fn parse_uninstall_flags_delete_data_forms() {
+        let (delete_data, _) = parse_uninstall_flags(&flags(&["--delete-data"])).unwrap();
+        assert!(delete_data);
+        let (delete_data, _) = parse_uninstall_flags(&flags(&["-d"])).unwrap();
+        assert!(delete_data);
+    }
+
+    #[test]
+    fn parse_uninstall_flags_yes_forms() {
+        let (delete_data, assume_yes) = parse_uninstall_flags(&flags(&["-d", "--yes"])).unwrap();
+        assert!(delete_data);
+        assert!(assume_yes);
+        let (_, assume_yes) = parse_uninstall_flags(&flags(&["-y"])).unwrap();
+        assert!(assume_yes);
+    }
+
+    #[test]
+    fn parse_uninstall_flags_rejects_unknown() {
+        assert!(parse_uninstall_flags(&flags(&["--purge"])).is_err());
+    }
+
+    fn temp_uninstall_env() -> (std::path::PathBuf, std::path::PathBuf) {
+        let base = std::env::temp_dir().join(format!("vault-uninstall-test-{}", Uuid::new_v4()));
+        let data = base.join("data");
+        let binary = base.join("vault");
+        std::fs::create_dir_all(&data).unwrap();
+        std::fs::write(&binary, b"fake vault binary").unwrap();
+        std::fs::write(data.join("vault.db"), b"fake db").unwrap();
+        (data, binary)
+    }
+
+    #[test]
+    fn uninstall_without_delete_data_keeps_passwords() {
+        let (data, binary) = temp_uninstall_env();
+        cmd_uninstall(false, true, &data.to_string_lossy(), &binary).unwrap();
+        assert!(!binary.exists(), "binary should be removed");
+        assert!(data.join("vault.db").exists(), "passwords should be kept");
+        std::fs::remove_dir_all(data.parent().unwrap()).ok();
+    }
+
+    #[test]
+    fn uninstall_with_delete_data_removes_passwords() {
+        let (data, binary) = temp_uninstall_env();
+        cmd_uninstall(true, true, &data.to_string_lossy(), &binary).unwrap();
+        assert!(!binary.exists(), "binary should be removed");
+        assert!(!data.exists(), "passwords should be deleted");
+        std::fs::remove_dir_all(data.parent().unwrap()).ok();
+    }
+
+    #[test]
+    fn uninstall_delete_data_missing_dir_is_ok() {
+        let (data, binary) = temp_uninstall_env();
+        std::fs::remove_dir_all(&data).unwrap();
+        cmd_uninstall(true, true, &data.to_string_lossy(), &binary).unwrap();
+        assert!(!binary.exists());
+        std::fs::remove_dir_all(data.parent().unwrap()).ok();
+    }
 }
