@@ -56,6 +56,12 @@ echo "📂 Extracting..."
 tar xzf "$TMP_DIR/$ARTIFACT" -C "$TMP_DIR"
 
 echo "🚀 Installing to ${INSTALL_DIR}..."
+# Ensure the install directory exists — /usr/local/bin is not present
+# by default on macOS (esp. Apple Silicon), so mkdir before copying.
+if ! mkdir -p "$INSTALL_DIR" 2>/dev/null; then
+    sudo mkdir -p "$INSTALL_DIR"
+fi
+
 if [ -w "$INSTALL_DIR" ]; then
     cp "$TMP_DIR/vault" "$INSTALL_DIR/vault"
 else
